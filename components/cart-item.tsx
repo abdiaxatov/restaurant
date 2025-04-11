@@ -31,17 +31,17 @@ export function CartItem({ item }: CartItemProps) {
 
   return (
     <motion.div
-      className="flex items-center gap-4 rounded-lg border p-3 shadow-sm transition-all hover:shadow-md"
+      className="flex items-center gap-3 rounded-lg border bg-card p-3 shadow-sm transition-all hover:shadow-md"
       whileHover={{ scale: 1.01 }}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       layout
     >
-      <div className="relative h-16 w-16 overflow-hidden rounded-md flex-shrink-0">
+      <div className="relative h-20 w-20 overflow-hidden rounded-md flex-shrink-0">
         {!imageError ? (
           <Image
-            src={item.imageUrl || "/placeholder.svg?height=64&width=64"}
+            src={item.imageUrl || "/placeholder.svg?height=80&width=80"}
             alt={item.name}
             fill
             className="object-cover"
@@ -53,20 +53,42 @@ export function CartItem({ item }: CartItemProps) {
           </div>
         )}
       </div>
-      <div className="flex-1">
-        <h3 className="font-medium">{item.name}</h3>
-        <p className="text-sm text-muted-foreground">{formatCurrency(item.price)}</p>
+
+      <div className="flex flex-1 flex-col">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-medium line-clamp-1">{item.name}</h3>
+            <p className="text-sm text-muted-foreground">{formatCurrency(item.price)}</p>
+          </div>
+          <div className="text-right font-medium text-primary">{formatCurrency(item.price * item.quantity)}</div>
+        </div>
+
+        <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center rounded-full border bg-background p-1">
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={handleDecrement}>
+              {item.quantity === 1 ? (
+                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              ) : (
+                <Minus className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            <span className="w-8 text-center font-medium">{item.quantity}</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={handleIncrement}>
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-muted-foreground hover:text-destructive"
+            onClick={() => removeFromCart(item.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="ml-1 hidden sm:inline-block">O'chirish</span>
+          </Button>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={handleDecrement}>
-          {item.quantity === 1 ? <Trash2 className="h-4 w-4 text-destructive" /> : <Minus className="h-4 w-4" />}
-        </Button>
-        <span className="w-6 text-center font-medium">{item.quantity}</span>
-        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full" onClick={handleIncrement}>
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="w-20 text-right font-medium text-amber-700">{formatCurrency(item.price * item.quantity)}</div>
     </motion.div>
   )
 }

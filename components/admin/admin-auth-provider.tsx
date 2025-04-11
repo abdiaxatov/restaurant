@@ -18,44 +18,35 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const { toast } = useToast()
 
   useEffect(() => {
-    console.log("AdminAuthProvider mounted, pathname:", pathname)
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log("Auth state changed, user:", user?.uid)
-
-      if (!user) {
-        console.log("No user, redirecting to login")
-        // Redirect to login if not authenticated
-        if (pathname !== "/admin/login") {
-          router.push("/admin/login")
-        }
-        setIsLoading(false)
-        return
-      }
-
       try {
+        if (!user) {
+          // Redirect to login if not authenticated and not already on login page
+          if (pathname !== "/admin/login") {
+            router.push("/admin/login")
+          }
+          setIsLoading(false)
+          return
+        }
+
         // Get user role from Firestore
         const userDoc = await getDoc(doc(db, "users", user.uid))
-        console.log("User document exists:", userDoc.exists())
 
         if (userDoc.exists()) {
           const userData = userDoc.data()
           const role = userData.role
-          console.log("User role:", role)
           setUserRole(role)
 
-          // Redirect based on role
+          // Redirect based on role and current path
           if (pathname === "/admin/login") {
-            console.log("On login page, redirecting based on role")
             if (role === "chef" || role === "oshpaz") {
               router.push("/admin/chef")
             } else if (role === "waiter" || role === "ofitsiant") {
               router.push("/admin/waiter")
-            } else if (role === "admin") {
+            } else {
               router.push("/admin/dashboard")
             }
           } else if (pathname.includes("/admin/chef") && role !== "chef" && role !== "oshpaz" && role !== "admin") {
-            console.log("Unauthorized access to chef page")
             toast({
               title: "Ruxsat yo'q",
               description: "Sizda oshpaz sahifasiga kirish huquqi yo'q",
@@ -68,7 +59,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
             role !== "ofitsiant" &&
             role !== "admin"
           ) {
-            console.log("Unauthorized access to waiter page")
             toast({
               title: "Ruxsat yo'q",
               description: "Sizda ofitsiant sahifasiga kirish huquqi yo'q",
@@ -81,7 +71,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
             role !== "admin" &&
             pathname !== "/admin/login"
           ) {
-            console.log("Non-admin trying to access admin page")
             // Non-admin users can't access other admin pages
             if (role === "chef" || role === "oshpaz") {
               router.push("/admin/chef")
@@ -90,7 +79,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
         } else {
-          console.log("User document doesn't exist")
           // User document doesn't exist
           if (pathname !== "/admin/login") {
             router.push("/admin/login")
@@ -101,9 +89,9 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         if (pathname !== "/admin/login") {
           router.push("/admin/login")
         }
+      } finally {
+        setIsLoading(false)
       }
-
-      setIsLoading(false)
     })
 
     return () => unsubscribe()
@@ -111,7 +99,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-white">
         <Loader2 className="mb-4 h-12 w-12 animate-spin text-primary" />
         <p>Yuklanmoqda...</p>
       </div>
