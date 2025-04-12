@@ -101,7 +101,7 @@ export function MenuPage() {
   return (
     <div className="flex min-h-screen flex-col pb-20">
       {/* Header with search and tabs */}
-      <header className="sticky top-0 z-10 bg-white p-4 shadow-sm">
+      <header className="sticky top-0 z-10 bg-white p-4 ">
         <div className="mb-4">
           <SearchBar onSearch={handleSearch} />
         </div>
@@ -137,7 +137,7 @@ export function MenuPage() {
               />
             </div>
           </div>
-          <div className="fixed bottom-16 right-4">
+          <div className="fixed bottom-16  right-4 z-50">
             <CartButton />
           </div>
         </>

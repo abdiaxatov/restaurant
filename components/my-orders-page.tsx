@@ -156,7 +156,11 @@ export function MyOrdersPage() {
               return dateB.getTime() - dateA.getTime()
             })
             .map((order) => (
-              <Card key={order.id} className="overflow-hidden">
+              <Card
+                key={order.id}
+                className="overflow-hidden cursor-pointer transition-all hover:shadow-md"
+                onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
+              >
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center justify-between text-lg">
                     <span>{order.orderType === "table" ? `Stol #${order.tableNumber}` : "Yetkazib berish"}</span>

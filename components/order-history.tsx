@@ -10,11 +10,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"
 import { Clock, CheckCircle, ChefHat, Utensils, MapPin, Phone } from "lucide-react"
 import type { Order } from "@/types"
+import { useRouter } from "next/navigation"
 
 export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const router = useRouter()
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -159,7 +161,11 @@ export function OrderHistory() {
 
       <div className="space-y-4">
         {sortedOrders.map((order) => (
-          <Card key={order.id} className="overflow-hidden">
+          <Card
+            key={order.id}
+            className="overflow-hidden cursor-pointer transition-all hover:shadow-md"
+            onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between text-lg">
                 <span>{order.orderType === "table" ? `Stol #${order.tableNumber}` : "Yetkazib berish"}</span>
