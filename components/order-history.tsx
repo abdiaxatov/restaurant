@@ -155,10 +155,6 @@ export function OrderHistory() {
   return (
     <div className="space-y-4">
       <Tabs defaultValue="all" onValueChange={setStatusFilter}>
-        <TabsList className="mb-4 w-full flex-wrap">
-          <TabsTrigger value="all">Barchasi</TabsTrigger>
-          <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
-        </TabsList>
       </Tabs>
 
       <div className="space-y-4">
