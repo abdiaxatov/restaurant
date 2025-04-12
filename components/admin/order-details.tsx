@@ -71,12 +71,6 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
 
   return (
     <div className="h-full">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-bold">Buyurtma tafsilotlari</h2>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
 
       <div className="mb-6">
         <div className="mb-2 grid grid-cols-2 gap-2">
@@ -86,10 +80,15 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
                 <p className="text-sm text-muted-foreground">Xona raqami</p>
                 <p className="font-medium">#{order.roomNumber}</p>
               </>
-            ) : (
+            ) : order.tableNumber ? (
               <>
                 <p className="text-sm text-muted-foreground">Stol raqami</p>
                 <p className="font-medium">#{order.tableNumber}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">Buyurtma turi</p>
+                <p className="font-medium">Yetkazib berish</p>
               </>
             )}
           </div>
@@ -106,6 +105,12 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
           <div className="mb-2">
             <p className="text-sm text-muted-foreground">Telefon raqami</p>
             <p className="font-medium">{order.phoneNumber}</p>
+          </div>
+        )}
+        {order.address && (
+          <div className="mb-2">
+            <p className="text-sm text-muted-foreground">Manzil</p>
+            <p className="font-medium">{order.address}</p>
           </div>
         )}
       </div>
@@ -130,6 +135,26 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
       </div>
 
       <div className="mb-6">
+        {order.orderType === "delivery" && (
+          <>
+            <div className="flex items-center justify-between border-t pt-2">
+              <p>Taomlar narxi</p>
+              <p>{formatCurrency(order.subtotal || order.total)}</p>
+            </div>
+            {order.containerCost > 0 && (
+              <div className="flex items-center justify-between">
+                <p>Idishlar narxi</p>
+                <p>{formatCurrency(order.containerCost)}</p>
+              </div>
+            )}
+            {order.deliveryFee > 0 && (
+              <div className="flex items-center justify-between">
+                <p>Yetkazib berish narxi</p>
+                <p>{formatCurrency(order.deliveryFee)}</p>
+              </div>
+            )}
+          </>
+        )}
         <div className="flex items-center justify-between border-t pt-2">
           <p className="font-semibold">Jami</p>
           <p className="font-semibold">{formatCurrency(order.total)}</p>

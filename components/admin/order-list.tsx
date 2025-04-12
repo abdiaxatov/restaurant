@@ -1,8 +1,7 @@
 "use client"
-
-import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
+import { MapPin, Phone, Clock, ShoppingBag, User } from "lucide-react"
 import type { Order } from "@/types"
 
 interface OrderListProps {
@@ -11,7 +10,7 @@ interface OrderListProps {
   onSelectOrder: (order: Order) => void
 }
 
-const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) => {
+export const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) => {
   if (orders.length === 0) {
     return <div className="py-8 text-center text-muted-foreground">Buyurtmalar topilmadi</div>
   }
@@ -60,31 +59,82 @@ const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) =
   }
 
   return (
-    <div className="space-y-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {orders.map((order) => (
         <Card
           key={order.id}
-          className={`cursor-pointer p-4 transition-colors hover:bg-muted/50 ${
-            selectedOrderId === order.id ? "border-primary" : ""
+          className={`cursor-pointer overflow-hidden transition-all hover:shadow-md ${
+            selectedOrderId === order.id ? "ring-2 ring-primary" : ""
           }`}
           onClick={() => onSelectOrder(order)}
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                {order.roomNumber ? (
-                  <h3 className="font-semibold">Xona #{order.roomNumber}</h3>
-                ) : (
-                  <h3 className="font-semibold">Stol #{order.tableNumber}</h3>
-                )}
-                <Badge className={getStatusColor(order.status)}>{getStatusText(order.status)}</Badge>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
-              {order.phoneNumber && <p className="mt-1 text-sm text-muted-foreground">Tel: {order.phoneNumber}</p>}
+          {/* Status header */}
+          <div className={`${getStatusColor(order.status)} px-4 py-2`}>
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{getStatusText(order.status)}</span>
+              <span className="text-sm">{formatDate(order.createdAt)}</span>
             </div>
-            <div className="text-right">
-              <p className="font-medium">{formatCurrency(order.total)}</p>
-              <p className="text-sm text-muted-foreground">{order.items.length} ta taom</p>
+          </div>
+
+          {/* Order content */}
+          <div className="p-4">
+            {/* Order type and number */}
+            <div className="mb-3 flex items-center">
+              {order.orderType === "delivery" ? (
+                <div className="flex items-center text-lg font-semibold">
+                  <MapPin className="mr-2 h-5 w-5 text-primary" />
+                  Yetkazib berish
+                </div>
+              ) : order.roomNumber ? (
+                <div className="flex items-center text-lg font-semibold">
+                  <User className="mr-2 h-5 w-5 text-primary" />
+                  Xona #{order.roomNumber}
+                </div>
+              ) : (
+                <div className="flex items-center text-lg font-semibold">
+                  <User className="mr-2 h-5 w-5 text-primary" />
+                  Stol #{order.tableNumber}
+                </div>
+              )}
+            </div>
+
+            {/* Order details */}
+            <div className="space-y-2">
+              {/* Items count */}
+              <div className="flex items-center text-sm text-muted-foreground">
+                <ShoppingBag className="mr-2 h-4 w-4" />
+                {order.items.length} ta taom
+              </div>
+
+              {/* Phone number if available */}
+              {order.phoneNumber && (
+                <div className="flex items-center text-sm text-muted-foreground">
+                  <Phone className="mr-2 h-4 w-4" />
+                  {order.phoneNumber}
+                </div>
+              )}
+
+              {/* Address for delivery orders */}
+              {order.orderType === "delivery" && order.address && (
+                <div className="flex items-start text-sm text-muted-foreground">
+                  <MapPin className="mr-2 h-4 w-4 shrink-0 mt-0.5" />
+                  <span className="line-clamp-2">{order.address}</span>
+                </div>
+              )}
+
+              {/* Order time */}
+              <div className="flex items-center text-sm text-muted-foreground">
+                <Clock className="mr-2 h-4 w-4" />
+                {formatDate(order.createdAt)}
+              </div>
+            </div>
+
+            {/* Total price */}
+            <div className="mt-3 border-t pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Jami:</span>
+                <span className="text-lg font-bold text-primary">{formatCurrency(order.total)}</span>
+              </div>
             </div>
           </div>
         </Card>
@@ -92,5 +142,3 @@ const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) =
     </div>
   )
 }
-
-export { OrderList }

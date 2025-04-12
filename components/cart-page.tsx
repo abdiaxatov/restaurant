@@ -53,6 +53,10 @@ export function CartPage() {
     address?: boolean
   }>({})
 
+  // Add delivery fee and container cost state variables after the address state
+  const [deliveryFee, setDeliveryFee] = useState(15000) // Default delivery fee: 15,000 UZS
+  const [containerCost, setContainerCost] = useState(0) // Container cost will be calculated based on items
+
   // Check if there are available tables, rooms and if delivery is available
   useEffect(() => {
     setIsLoading(true)
@@ -140,6 +144,19 @@ export function CartPage() {
       }
     }
   }, [])
+
+  // Add a useEffect to calculate container costs based on items
+  useEffect(() => {
+    if (orderType === "delivery") {
+      // Calculate container cost based on number of items (e.g., 2,000 UZS per item)
+      const calculatedContainerCost = items.reduce((total, item) => {
+        return total + item.quantity * 2000 // 2,000 UZS per item for containers
+      }, 0)
+      setContainerCost(calculatedContainerCost)
+    } else {
+      setContainerCost(0)
+    }
+  }, [items, orderType])
 
   // Handle table or room selection
   const handleSelectTableOrRoom = (table: number | null, room: number | null) => {
@@ -283,6 +300,9 @@ export function CartPage() {
       }
 
       // Prepare order data
+      const subtotal = getTotalPrice()
+      const totalWithDelivery = orderType === "delivery" ? subtotal + deliveryFee + containerCost : subtotal
+
       const orderData = {
         orderType,
         tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
@@ -295,7 +315,10 @@ export function CartPage() {
           price: item.price,
           quantity: item.quantity,
         })),
-        total: getTotalPrice(),
+        subtotal: subtotal,
+        deliveryFee: orderType === "delivery" ? deliveryFee : 0,
+        containerCost: orderType === "delivery" ? containerCost : 0,
+        total: totalWithDelivery,
         status: "pending",
         createdAt: serverTimestamp(),
       }
@@ -643,9 +666,32 @@ export function CartPage() {
                       <span>{items.reduce((sum, item) => sum + item.quantity, 0)} ta</span>
                     </div>
                     <Separator className="my-2" />
+
+                    {orderType === "delivery" && (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Taomlar narxi:</span>
+                          <span>{formatCurrency(getTotalPrice())}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Idishlar narxi:</span>
+                          <span>{formatCurrency(containerCost)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Yetkazib berish narxi:</span>
+                          <span>{formatCurrency(deliveryFee)}</span>
+                        </div>
+                        <Separator className="my-2" />
+                      </>
+                    )}
+
                     <div className="flex items-center justify-between font-medium">
                       <span>Jami summa:</span>
-                      <span className="text-lg text-primary">{formatCurrency(getTotalPrice())}</span>
+                      <span className="text-lg text-primary">
+                        {formatCurrency(
+                          orderType === "delivery" ? getTotalPrice() + deliveryFee + containerCost : getTotalPrice(),
+                        )}
+                      </span>
                     </div>
                   </div>
                   <Button

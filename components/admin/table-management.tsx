@@ -1557,10 +1557,6 @@ export function TableManagement() {
                         )}
                       </CardContent>
                       <CardFooter className="p-4 pt-0">
-                        <Button variant="outline" className="w-full" onClick={() => setViewingRoomTables(room)}>
-                          <LayoutGrid className="mr-2 h-4 w-4" />
-                          Stollarni ko'rish
-                        </Button>
                       </CardFooter>
                     </Card>
                   ))

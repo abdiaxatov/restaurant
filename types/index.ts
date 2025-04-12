@@ -24,6 +24,7 @@ export interface CartItem extends MenuItem {
   quantity: number
 }
 
+// Update the Order type to include delivery costs
 export interface Order {
   id?: string
   orderType: "table" | "delivery"
@@ -37,6 +38,9 @@ export interface Order {
     price: number
     quantity: number
   }[]
+  subtotal?: number // Added for delivery orders
+  deliveryFee?: number // Added for delivery orders
+  containerCost?: number // Added for delivery orders
   total: number
   status: string
   createdAt: any // Firestore timestamp

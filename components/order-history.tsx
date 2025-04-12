@@ -217,6 +217,29 @@ export function OrderHistory() {
                   </div>
                 ))}
 
+                {order.orderType === "delivery" && (
+                  <>
+                    {order.subtotal && (
+                      <div className="flex justify-between text-sm">
+                        <span>Taomlar narxi</span>
+                        <span>{formatCurrency(order.subtotal)}</span>
+                      </div>
+                    )}
+                    {order.containerCost > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span>Idishlar narxi</span>
+                        <span>{formatCurrency(order.containerCost)}</span>
+                      </div>
+                    )}
+                    {order.deliveryFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span>Yetkazib berish narxi</span>
+                        <span>{formatCurrency(order.deliveryFee)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <Separator className="my-2" />
 
                 <div className="flex justify-between font-medium">

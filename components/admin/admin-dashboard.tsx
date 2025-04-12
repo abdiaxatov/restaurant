@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, memo } from "react"
+import { useState, useEffect, useRef } from "react"
 import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
@@ -14,10 +14,6 @@ import { formatCurrency } from "@/lib/utils"
 import { ShoppingBag, DollarSign, Clock, Truck } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import type { Order } from "@/types"
-
-// Memoize components to prevent unnecessary re-renders
-const MemoizedOrderList = memo(OrderList)
-const MemoizedOrderDetails = memo(OrderDetails)
 
 export function AdminDashboard() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -41,7 +37,13 @@ export function AdminDashboard() {
       (snapshot) => {
         const ordersList: Order[] = []
         snapshot.forEach((doc) => {
-          ordersList.push({ id: doc.id, ...doc.data() } as Order)
+          const data = doc.data()
+          // Make sure delivery orders don't have table numbers
+          if (data.orderType === "delivery") {
+            data.tableNumber = null
+            data.roomNumber = null
+          }
+          ordersList.push({ id: doc.id, ...data } as Order)
         })
         setOrders(ordersList)
         setIsLoading(false)
@@ -284,11 +286,7 @@ export function AdminDashboard() {
           {isLoading ? (
             <p>Buyurtmalar yuklanmoqda...</p>
           ) : (
-            <MemoizedOrderList
-              orders={filteredOrders}
-              selectedOrderId={selectedOrder?.id}
-              onSelectOrder={handleSelectOrder}
-            />
+            <OrderList orders={filteredOrders} selectedOrderId={selectedOrder?.id} onSelectOrder={handleSelectOrder} />
           )}
         </div>
 
@@ -297,7 +295,7 @@ export function AdminDashboard() {
           <DialogContent className="sm:max-w-[600px]">
             {/* Add DialogTitle for accessibility */}
             <DialogTitle className="text-lg font-semibold">{selectedOrder ? "Buyurtma tafsilotlari" : ""}</DialogTitle>
-            {selectedOrder && <MemoizedOrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} />}
+            {selectedOrder && <OrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} />}
           </DialogContent>
         </Dialog>
       </div>

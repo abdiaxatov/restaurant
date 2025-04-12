@@ -167,6 +167,27 @@ export default function ConfirmationPage() {
             </div>
           ))}
 
+          {order.orderType === "delivery" && (
+            <>
+              <div className="flex justify-between pt-2 text-sm">
+                <span>Taomlar narxi</span>
+                <span>{formatCurrency(order.subtotal || order.total)}</span>
+              </div>
+              {order.containerCost > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span>Idishlar narxi</span>
+                  <span>{formatCurrency(order.containerCost)}</span>
+                </div>
+              )}
+              {order.deliveryFee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span>Yetkazib berish narxi</span>
+                  <span>{formatCurrency(order.deliveryFee)}</span>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="flex justify-between pt-2 font-medium">
             <span>Jami</span>
             <span>{formatCurrency(order.total)}</span>
