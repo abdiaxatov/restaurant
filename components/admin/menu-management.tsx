@@ -5,12 +5,13 @@ import { collection, query, orderBy, onSnapshot, doc, deleteDoc } from "firebase
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { MenuItemForm } from "@/components/menu-item-form"
+import { CategoryManagement } from "@/components/admin/category-management"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
-import { Plus, Search, Trash2, Edit } from "lucide-react"
+import { Plus, Search, Trash2, Edit, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
 import {
@@ -209,17 +210,8 @@ export function MenuManagement() {
             </div>
 
             {isLoading ? (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Card key={i} className="overflow-hidden">
-                    <div className="aspect-video animate-pulse bg-muted"></div>
-                    <CardContent className="p-4">
-                      <div className="h-5 w-3/4 animate-pulse rounded bg-muted"></div>
-                      <div className="mt-2 h-4 w-1/2 animate-pulse rounded bg-muted"></div>
-                      <div className="mt-2 h-4 w-1/4 animate-pulse rounded bg-muted"></div>
-                    </CardContent>
-                  </Card>
-                ))}
+              <div className="flex h-60 items-center justify-center">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="rounded-lg border border-dashed p-8 text-center">
@@ -282,48 +274,7 @@ export function MenuManagement() {
           </TabsContent>
 
           <TabsContent value="categories">
-            <div className="space-y-4">
-              <div className="rounded-md border">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-3 text-left font-medium">Nomi</th>
-                      <th className="px-4 py-3 text-right font-medium">Amallar</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categories.map((category) => (
-                      <tr key={category.id} className="border-b">
-                        <td className="px-4 py-3">{category.name}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <Card>
-                <CardHeader>
-                  <h3 className="text-lg font-medium">Yangi kategoriya qo'shish</h3>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-2">
-                    <Input placeholder="Kategoriya nomi" className="flex-1" />
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Qo'shish
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <CategoryManagement />
           </TabsContent>
         </Tabs>
 
@@ -341,7 +292,14 @@ export function MenuManagement() {
                 Bekor qilish
               </Button>
               <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
-                {isDeleting ? "O'chirilmoqda..." : "O'chirish"}
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    O'chirilmoqda...
+                  </>
+                ) : (
+                  "O'chirish"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

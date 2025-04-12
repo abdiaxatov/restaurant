@@ -11,7 +11,7 @@ interface OrderListProps {
   onSelectOrder: (order: Order) => void
 }
 
-export function OrderList({ orders, selectedOrderId, onSelectOrder }: OrderListProps) {
+const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) => {
   if (orders.length === 0) {
     return <div className="py-8 text-center text-muted-foreground">Buyurtmalar topilmadi</div>
   }
@@ -72,7 +72,11 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder }: OrderListP
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold">Stol #{order.tableNumber}</h3>
+                {order.roomNumber ? (
+                  <h3 className="font-semibold">Xona #{order.roomNumber}</h3>
+                ) : (
+                  <h3 className="font-semibold">Stol #{order.tableNumber}</h3>
+                )}
                 <Badge className={getStatusColor(order.status)}>{getStatusText(order.status)}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
@@ -88,3 +92,5 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder }: OrderListP
     </div>
   )
 }
+
+export { OrderList }

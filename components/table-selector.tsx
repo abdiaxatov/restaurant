@@ -1,67 +1,318 @@
-// Fix the TableSelector component to properly display table numbers
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Table } from "lucide-react"
+import { Table, Loader2, Home } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { collection, query, onSnapshot, where, getDocs } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import { useToast } from "@/components/ui/use-toast"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface TableSelectorProps {
   selectedTable: number | null
-  onSelectTable: (tableNumber: number) => void
+  selectedRoom: number | null
+  onSelectTable: (tableNumber: number | null, roomNumber: number | null) => void
   hasError?: boolean
 }
 
-export function TableSelector({ selectedTable, onSelectTable, hasError = false }: TableSelectorProps) {
-  const [isOpen, setIsOpen] = useState(false)
+type TableData = {
+  id: string
+  number: number
+  seats: number
+  status: "available" | "occupied" | "reserved"
+  roomId?: string
+}
 
-  // Generate some sample tables for demonstration
-  const tables = Array.from({ length: 20 }, (_, i) => ({
-    id: (i + 1).toString(),
-    number: i + 1,
-    seats: Math.floor(Math.random() * 4) + 2, // Random seats between 2-6
-    status: "available" as const,
-  }))
+type RoomData = {
+  id: string
+  number: number
+  capacity: number
+  status?: "available" | "occupied"
+}
+
+export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasError = false }: TableSelectorProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [tables, setTables] = useState<TableData[]>([])
+  const [rooms, setRooms] = useState<RoomData[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<string>("tables")
+  const [viewingRoom, setViewingRoom] = useState<RoomData | null>(null)
+  const [tablesInSelectedRoom, setTablesInSelectedRoom] = useState<TableData[]>([])
+  const { toast } = useToast()
+
+  useEffect(() => {
+    // Initialize with empty functions to avoid undefined errors
+    let tablesUnsubscribe = () => {}
+    let roomsUnsubscribe = () => {}
+
+    const fetchData = async () => {
+      try {
+        // Fetch tables from Firestore - use separate queries to avoid index requirements
+        const tablesQuery = query(collection(db, "tables"), where("status", "==", "available"))
+
+        tablesUnsubscribe = onSnapshot(
+          tablesQuery,
+          (snapshot) => {
+            const tablesData: TableData[] = []
+            snapshot.forEach((doc) => {
+              tablesData.push({ id: doc.id, ...doc.data() } as TableData)
+            })
+
+            // Sort tables by number after fetching
+            tablesData.sort((a, b) => a.number - b.number)
+            setTables(tablesData)
+            setIsLoading(false)
+          },
+          (error) => {
+            console.error("Error fetching tables:", error)
+            toast({
+              title: "Xatolik",
+              description: "Stollarni yuklashda xatolik yuz berdi",
+              variant: "destructive",
+            })
+            setIsLoading(false)
+          },
+        )
+
+        // Fetch rooms from Firestore
+        const roomsQuery = query(collection(db, "rooms"))
+
+        roomsUnsubscribe = onSnapshot(
+          roomsQuery,
+          (snapshot) => {
+            const roomsData: RoomData[] = []
+            snapshot.forEach((doc) => {
+              roomsData.push({ id: doc.id, ...doc.data() } as RoomData)
+            })
+
+            // Sort rooms by number
+            roomsData.sort((a, b) => a.number - b.number)
+
+            // Filter out occupied rooms
+            const availableRooms = roomsData.filter((room) => !room.status || room.status === "available")
+            setRooms(availableRooms)
+          },
+          (error) => {
+            console.error("Error fetching rooms:", error)
+          },
+        )
+      } catch (error) {
+        console.error("Error setting up listeners:", error)
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+
+    // Clean up function
+    return () => {
+      try {
+        if (typeof tablesUnsubscribe === "function") {
+          tablesUnsubscribe()
+        }
+        if (typeof roomsUnsubscribe === "function") {
+          roomsUnsubscribe()
+        }
+      } catch (error) {
+        console.error("Error unsubscribing:", error)
+      }
+    }
+  }, [toast])
+
+  // When a room is selected for viewing, fetch tables in that room
+  useEffect(() => {
+    if (!viewingRoom) {
+      setTablesInSelectedRoom([])
+      return
+    }
+
+    const fetchTablesInRoom = async () => {
+      try {
+        const tablesInRoomQuery = query(
+          collection(db, "tables"),
+          where("roomId", "==", viewingRoom.id),
+          where("status", "==", "available"),
+        )
+
+        const tablesSnapshot = await getDocs(tablesInRoomQuery)
+        const tablesData: TableData[] = []
+
+        tablesSnapshot.forEach((doc) => {
+          tablesData.push({ id: doc.id, ...doc.data() } as TableData)
+        })
+
+        // Sort tables by number
+        tablesData.sort((a, b) => a.number - b.number)
+        setTablesInSelectedRoom(tablesData)
+      } catch (error) {
+        console.error("Error fetching tables in room:", error)
+        toast({
+          title: "Xatolik",
+          description: "Xonadagi stollarni yuklashda xatolik yuz berdi",
+          variant: "destructive",
+        })
+      }
+    }
+
+    if (viewingRoom) {
+      fetchTablesInRoom()
+    }
+  }, [viewingRoom, toast])
+
+  const handleSelectTable = (tableNumber: number) => {
+    onSelectTable(tableNumber, null)
+    setIsOpen(false)
+    setViewingRoom(null)
+  }
+
+  const handleSelectRoom = (room: RoomData) => {
+    // If we're selecting a room directly (not viewing its tables)
+    if (activeTab === "rooms") {
+      onSelectTable(null, room.number)
+      setIsOpen(false)
+    } else {
+      // If we're viewing tables in a room
+      setViewingRoom(room)
+    }
+  }
+
+  const handleBackToRooms = () => {
+    setViewingRoom(null)
+  }
+
+  // Get the selected table or room info for display
+  const getSelectionDisplay = () => {
+    if (selectedRoom) {
+      const room = rooms.find((r) => r.number === selectedRoom)
+      return room ? `${room.number} xona (${room.capacity} kishilik)` : `Xona #${selectedRoom}`
+    }
+
+    if (selectedTable) {
+      const table = tables.find((t) => t.number === selectedTable)
+      return table ? `${table.number} stol (${table.seats} kishilik)` : `Stol #${selectedTable}`
+    }
+
+    return "Stol yoki xona tanlang"
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" className={`w-full justify-start ${hasError ? "border-destructive" : ""}`}>
-          <Table className="mr-2 h-4 w-4" />
-          {selectedTable ? `Stol #${selectedTable}` : "Stol tanlang"}
+          {selectedRoom ? <Home className="mr-2 h-4 w-4" /> : <Table className="mr-2 h-4 w-4" />}
+          {getSelectionDisplay()}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Stol tanlash</DialogTitle>
+          <DialogTitle>
+            {viewingRoom ? `${viewingRoom.number} xona (${viewingRoom.capacity} kishilik)` : "Stol yoki xona tanlash"}
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
-          {tables.map((table) => (
-            <Card
-              key={table.id}
-              className={`cursor-pointer transition-all hover:bg-muted ${
-                selectedTable === table.number ? "border-2 border-primary" : ""
-              }`}
-              onClick={() => {
-                onSelectTable(table.number)
-                setIsOpen(false)
-              }}
-            >
-              <CardContent className="p-4">
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-medium">Stol #{table.number}</span>
-                    <Badge variant="outline">{table.seats} o'rin</Badge>
-                  </div>
-                  <span className="text-xs text-muted-foreground">Mavjud</span>
+        {isLoading ? (
+          <div className="flex h-60 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : viewingRoom ? (
+          // Show tables in the selected room
+          <div>
+            <Button variant="ghost" onClick={handleBackToRooms} className="mb-4">
+              ← Xonalarga qaytish
+            </Button>
+
+            <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
+              {tablesInSelectedRoom.length === 0 ? (
+                <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                  <p className="text-muted-foreground">Bu xonada bo'sh stollar topilmadi</p>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+              ) : (
+                tablesInSelectedRoom.map((table) => (
+                  <Card
+                    key={table.id}
+                    className="cursor-pointer transition-all hover:bg-muted"
+                    onClick={() => handleSelectTable(table.number)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg font-medium">{table.number} stol</span>
+                          <Badge variant="outline">{table.seats} kishilik</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="mb-4 grid w-full grid-cols-2">
+              <TabsTrigger value="tables">Stollar</TabsTrigger>
+              <TabsTrigger value="rooms">Xonalar</TabsTrigger>
+            </TabsList>
+
+            {/* Tables Tab */}
+            <TabsContent value="tables">
+              <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
+                {tables.length === 0 ? (
+                  <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                    <p className="text-muted-foreground">Bo'sh stollar topilmadi</p>
+                  </div>
+                ) : (
+                  tables.map((table) => (
+                    <Card
+                      key={table.id}
+                      className="cursor-pointer transition-all hover:bg-muted"
+                      onClick={() => handleSelectTable(table.number)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-lg font-medium">{table.number} stol</span>
+                            <Badge variant="outline">{table.seats} kishilik</Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Rooms Tab */}
+            <TabsContent value="rooms">
+              <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
+                {rooms.length === 0 ? (
+                  <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                    <p className="text-muted-foreground">Bo'sh xonalar topilmadi</p>
+                  </div>
+                ) : (
+                  rooms.map((room) => (
+                    <Card
+                      key={room.id}
+                      className="cursor-pointer transition-all hover:bg-muted"
+                      onClick={() => handleSelectRoom(room)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-lg font-medium">{room.number} xona</span>
+                            <Badge variant="outline">{room.capacity} kishilik</Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+        )}
       </DialogContent>
     </Dialog>
   )

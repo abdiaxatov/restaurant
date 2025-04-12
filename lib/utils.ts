@@ -13,3 +13,33 @@ export function formatCurrency(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount)
 }
+
+export const getStatusIcon = (status: string) => {
+  switch (status) {
+    case "pending":
+      return { icon: "Clock", color: "text-amber-500" }
+    case "preparing":
+      return { icon: "ChefHat", color: "text-blue-500" }
+    case "ready":
+      return { icon: "Utensils", color: "text-green-500" }
+    case "completed":
+      return { icon: "CheckCircle", color: "text-green-700" }
+    default:
+      return { icon: "Clock", color: "text-gray-500" }
+  }
+}
+
+export const getStatusText = (status: string) => {
+  switch (status) {
+    case "pending":
+      return "Kutilmoqda"
+    case "preparing":
+      return "Tayyorlanmoqda"
+    case "ready":
+      return "Tayyor"
+    case "completed":
+      return "Yakunlangan"
+    default:
+      return status
+  }
+}

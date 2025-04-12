@@ -81,8 +81,17 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
       <div className="mb-6">
         <div className="mb-2 grid grid-cols-2 gap-2">
           <div>
-            <p className="text-sm text-muted-foreground">Stol raqami</p>
-            <p className="font-medium">#{order.tableNumber}</p>
+            {order.roomNumber ? (
+              <>
+                <p className="text-sm text-muted-foreground">Xona raqami</p>
+                <p className="font-medium">#{order.roomNumber}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">Stol raqami</p>
+                <p className="font-medium">#{order.tableNumber}</p>
+              </>
+            )}
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Status</p>

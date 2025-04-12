@@ -152,7 +152,6 @@ export function MenuPage() {
 function MenuLoadingSkeleton() {
   return (
     <div className="space-y-4">
-      <Skeleton className="h-10 w-full" />
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="space-y-2">

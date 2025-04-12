@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, memo } from "react"
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore"
+import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { OrderList } from "@/components/admin/order-list"
@@ -70,7 +70,36 @@ export function AdminDashboard() {
 
   // Handle order selection
   const handleSelectOrder = (order: Order) => {
-    setSelectedOrder(order)
+    // Get additional information about the order
+    if (order.orderType === "table" && order.tableNumber) {
+      // Find the table in the tables state
+      const tableQuery = query(collection(db, "tables"), where("number", "==", order.tableNumber))
+
+      getDocs(tableQuery)
+        .then((snapshot) => {
+          if (!snapshot.empty) {
+            const tableData = snapshot.docs[0].data()
+            // Add table info to the selected order
+            setSelectedOrder({
+              ...order,
+              tableInfo: {
+                status: tableData.status,
+                seats: tableData.seats,
+                roomId: tableData.roomId,
+              },
+            })
+          } else {
+            setSelectedOrder(order)
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching table info:", error)
+          setSelectedOrder(order)
+        })
+    } else {
+      setSelectedOrder(order)
+    }
+
     setIsOrderDetailsOpen(true)
   }
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCart } from "@/components/cart-provider"
 import { Button } from "@/components/ui/button"
@@ -13,28 +13,139 @@ import { useToast } from "@/components/ui/use-toast"
 import { CartItem } from "@/components/cart-item"
 import { TableSelector } from "@/components/table-selector"
 import { formatCurrency } from "@/lib/utils"
-import { collection, addDoc, serverTimestamp, doc, getDoc, updateDoc } from "firebase/firestore"
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  doc,
+  getDoc,
+  updateDoc,
+  getDocs,
+  query,
+  where,
+  onSnapshot,
+} from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { ArrowLeft, Loader2, ShoppingCart, Trash2 } from "lucide-react"
+import { ArrowLeft, Loader2, ShoppingCart, Trash2, AlertTriangle } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import type { MenuItem } from "@/types"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export function CartPage() {
   const { items, getTotalPrice, clearCart } = useCart()
   const [orderType, setOrderType] = useState<"table" | "delivery">("table")
   const [tableNumber, setTableNumber] = useState<number | null>(null)
+  const [roomNumber, setRoomNumber] = useState<number | null>(null)
   const [phoneNumber, setPhoneNumber] = useState("")
   const [address, setAddress] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hasAvailableTables, setHasAvailableTables] = useState(true)
+  const [hasAvailableRooms, setHasAvailableRooms] = useState(true)
+  const [isDeliveryAvailable, setIsDeliveryAvailable] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
   const { toast } = useToast()
   // Add state for tracking validation errors
   const [validationErrors, setValidationErrors] = useState<{
-    tableNumber?: boolean
+    tableOrRoom?: boolean
     phoneNumber?: boolean
     address?: boolean
   }>({})
+
+  // Check if there are available tables, rooms and if delivery is available
+  useEffect(() => {
+    setIsLoading(true)
+
+    // Initialize empty unsubscribe functions
+    let tablesUnsubscribe = () => {}
+    let roomsUnsubscribe = () => {}
+    let settingsUnsubscribe = () => {}
+
+    try {
+      // Check for available tables
+      tablesUnsubscribe = onSnapshot(
+        query(collection(db, "tables"), where("status", "==", "available")),
+        (snapshot) => {
+          setHasAvailableTables(!snapshot.empty)
+
+          // If no tables are available, check if rooms are available
+          if (snapshot.empty) {
+            roomsUnsubscribe = onSnapshot(
+              query(collection(db, "rooms"), where("status", "!=", "occupied")),
+              (roomsSnapshot) => {
+                setHasAvailableRooms(!roomsSnapshot.empty)
+
+                // If no tables and no rooms are available, default to delivery
+                if (roomsSnapshot.empty) {
+                  setOrderType("delivery")
+                }
+
+                setIsLoading(false)
+              },
+              (error) => {
+                console.error("Error checking available rooms:", error)
+                setHasAvailableRooms(false)
+                setOrderType("delivery")
+                setIsLoading(false)
+              },
+            )
+          } else {
+            setIsLoading(false)
+          }
+        },
+        (error) => {
+          console.error("Error checking available tables:", error)
+          setHasAvailableTables(false)
+          setOrderType("delivery")
+          setIsLoading(false)
+        },
+      )
+
+      // Check if delivery is available from settings
+      settingsUnsubscribe = onSnapshot(
+        doc(db, "settings", "orderSettings"),
+        (doc) => {
+          if (doc.exists()) {
+            const data = doc.data()
+            setIsDeliveryAvailable(data.deliveryAvailable !== false)
+          }
+          setIsLoading(false)
+        },
+        (error) => {
+          console.error("Error checking delivery availability:", error)
+          setIsDeliveryAvailable(true)
+          setIsLoading(false)
+        },
+      )
+    } catch (error) {
+      console.error("Error setting up listeners:", error)
+      setIsLoading(false)
+    }
+
+    return () => {
+      try {
+        // Safely unsubscribe
+        if (typeof tablesUnsubscribe === "function") {
+          tablesUnsubscribe()
+        }
+        if (typeof roomsUnsubscribe === "function") {
+          roomsUnsubscribe()
+        }
+        if (typeof settingsUnsubscribe === "function") {
+          settingsUnsubscribe()
+        }
+      } catch (error) {
+        console.error("Error unsubscribing:", error)
+      }
+    }
+  }, [])
+
+  // Handle table or room selection
+  const handleSelectTableOrRoom = (table: number | null, room: number | null) => {
+    setTableNumber(table)
+    setRoomNumber(room)
+  }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
   const handlePlaceOrder = async () => {
@@ -43,7 +154,7 @@ export function CartPage() {
 
     // Initialize a new validation errors object
     const newValidationErrors: {
-      tableNumber?: boolean
+      tableOrRoom?: boolean
       phoneNumber?: boolean
       address?: boolean
     } = {}
@@ -59,8 +170,8 @@ export function CartPage() {
       return
     }
 
-    if (orderType === "table" && !tableNumber) {
-      newValidationErrors.tableNumber = true
+    if (orderType === "table" && !tableNumber && !roomNumber) {
+      newValidationErrors.tableOrRoom = true
       hasErrors = true
     }
 
@@ -89,34 +200,93 @@ export function CartPage() {
       return
     }
 
+    // Check if the selected order type is available
+    if (orderType === "table" && !hasAvailableTables && !hasAvailableRooms) {
+      toast({
+        title: "Stollar va xonalar mavjud emas",
+        description: "Hozirda bo'sh stollar va xonalar mavjud emas. Iltimos, yetkazib berish xizmatidan foydalaning.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (orderType === "delivery" && !isDeliveryAvailable) {
+      toast({
+        title: "Yetkazib berish mavjud emas",
+        description: "Hozirda yetkazib berish xizmati mavjud emas. Iltimos, stol buyurtmasidan foydalaning.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
       // Check if items have enough servings
       for (const item of items) {
-        const menuItemRef = doc(db, "menuItems", item.id)
-        const menuItemSnap = await getDoc(menuItemRef)
+        try {
+          const menuItemRef = doc(db, "menuItems", item.id)
+          const menuItemSnap = await getDoc(menuItemRef)
 
-        if (menuItemSnap.exists()) {
-          const menuItemData = menuItemSnap.data() as MenuItem
-          const remainingServings = menuItemData.remainingServings || menuItemData.servesCount
+          if (menuItemSnap.exists()) {
+            const menuItemData = menuItemSnap.data() as MenuItem
+            const remainingServings = menuItemData.remainingServings || menuItemData.servesCount
 
-          if (remainingServings < item.quantity) {
-            toast({
-              title: "Yetarli porsiya yo'q",
-              description: `Kechirasiz, ${item.name} taomidan faqat ${remainingServings} porsiya qolgan.`,
-              variant: "destructive",
-            })
-            setIsSubmitting(false)
-            return
+            if (remainingServings < item.quantity) {
+              toast({
+                title: "Yetarli porsiya yo'q",
+                description: `Kechirasiz, ${item.name} taomidan faqat ${remainingServings} porsiya qolgan.`,
+                variant: "destructive",
+              })
+              setIsSubmitting(false)
+              return
+            }
           }
+        } catch (error) {
+          console.error(`Error checking item ${item.id}:`, error)
+          toast({
+            title: "Xatolik",
+            description: "Taom ma'lumotlarini tekshirishda xatolik yuz berdi.",
+            variant: "destructive",
+          })
+          setIsSubmitting(false)
+          return
+        }
+      }
+
+      // If table is selected, mark it as occupied
+      if (orderType === "table" && tableNumber) {
+        const success = await markTableAsOccupied(tableNumber)
+        if (!success) {
+          toast({
+            title: "Xatolik",
+            description: "Stol statusini yangilashda xatolik yuz berdi.",
+            variant: "destructive",
+          })
+          setIsSubmitting(false)
+          return
+        }
+      }
+
+      // If room is selected, mark it as occupied
+      if (orderType === "table" && roomNumber) {
+        const success = await markRoomAsOccupied(roomNumber)
+        if (!success) {
+          toast({
+            title: "Xatolik",
+            description: "Xona statusini yangilashda xatolik yuz berdi.",
+            variant: "destructive",
+          })
+          setIsSubmitting(false)
+          return
         }
       }
 
       // Prepare order data
       const orderData = {
         orderType,
-        tableNumber: orderType === "table" ? tableNumber : null,
+        tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
+        roomNumber: orderType === "table" && roomNumber ? roomNumber : null,
         phoneNumber: phoneNumber || null,
         address: orderType === "delivery" ? address : null,
         items: items.map((item) => ({
@@ -135,16 +305,21 @@ export function CartPage() {
 
       // Update remaining servings for each item
       for (const item of items) {
-        const menuItemRef = doc(db, "menuItems", item.id)
-        const menuItemSnap = await getDoc(menuItemRef)
+        try {
+          const menuItemRef = doc(db, "menuItems", item.id)
+          const menuItemSnap = await getDoc(menuItemRef)
 
-        if (menuItemSnap.exists()) {
-          const menuItemData = menuItemSnap.data() as MenuItem
-          const remainingServings = (menuItemData.remainingServings || menuItemData.servesCount) - item.quantity
+          if (menuItemSnap.exists()) {
+            const menuItemData = menuItemSnap.data() as MenuItem
+            const remainingServings = (menuItemData.remainingServings || menuItemData.servesCount) - item.quantity
 
-          await updateDoc(menuItemRef, {
-            remainingServings: remainingServings > 0 ? remainingServings : 0,
-          })
+            await updateDoc(menuItemRef, {
+              remainingServings: remainingServings > 0 ? remainingServings : 0,
+            })
+          }
+        } catch (error) {
+          console.error(`Error updating item ${item.id}:`, error)
+          // Continue with the order even if updating an item fails
         }
       }
 
@@ -197,6 +372,64 @@ export function CartPage() {
         damping: 24,
       },
     },
+  }
+
+  // Function to mark a table as occupied
+  const markTableAsOccupied = async (tableNumber: number): Promise<boolean> => {
+    try {
+      // Find the table by number
+      const tablesQuery = query(collection(db, "tables"), where("number", "==", tableNumber))
+      const tablesSnapshot = await getDocs(tablesQuery)
+      let tableId: string | null = null
+
+      tablesSnapshot.forEach((doc) => {
+        tableId = doc.id
+      })
+
+      if (tableId) {
+        // Update table status to occupied
+        await updateDoc(doc(db, "tables", tableId), {
+          status: "occupied",
+          updatedAt: new Date(),
+        })
+        return true
+      } else {
+        console.error("Table not found")
+        return false
+      }
+    } catch (error) {
+      console.error("Error updating table status:", error)
+      return false
+    }
+  }
+
+  // Function to mark a room as occupied
+  const markRoomAsOccupied = async (roomNumber: number): Promise<boolean> => {
+    try {
+      // Find the room by number
+      const roomsQuery = query(collection(db, "rooms"), where("number", "==", roomNumber))
+      const roomsSnapshot = await getDocs(roomsQuery)
+      let roomId: string | null = null
+
+      roomsSnapshot.forEach((doc) => {
+        roomId = doc.id
+      })
+
+      if (roomId) {
+        // Update room status to occupied
+        await updateDoc(doc(db, "rooms", roomId), {
+          status: "occupied",
+          updatedAt: new Date(),
+        })
+        return true
+      } else {
+        console.error("Room not found")
+        return false
+      }
+    } catch (error) {
+      console.error("Error updating room status:", error)
+      return false
+    }
   }
 
   return (
@@ -269,93 +502,139 @@ export function CartPage() {
                   <CardTitle>Buyurtma ma'lumotlari</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <Tabs defaultValue="table" onValueChange={(value) => setOrderType(value as "table" | "delivery")}>
-                    <TabsList className="mb-4 grid w-full grid-cols-2">
-                      <TabsTrigger value="table">Stol buyurtmasi</TabsTrigger>
-                      <TabsTrigger value="delivery">Yetkazib berish</TabsTrigger>
-                    </TabsList>
-
-                    {/* Modify the TabsContent for table selection to add validation styling */}
-                    <TabsContent value="table" className="space-y-4">
-                      <div>
-                        <Label
-                          htmlFor="table-number"
-                          className={validationErrors.tableNumber ? "text-destructive" : ""}
+                  {isLoading ? (
+                    <div className="flex h-40 items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    <Tabs
+                      defaultValue={hasAvailableTables || hasAvailableRooms ? "table" : "delivery"}
+                      value={orderType}
+                      onValueChange={(value) => setOrderType(value as "table" | "delivery")}
+                    >
+                      <TabsList className="mb-4 grid w-full grid-cols-2">
+                        <TabsTrigger
+                          value="table"
+                          disabled={!hasAvailableTables && !hasAvailableRooms && !isDeliveryAvailable}
                         >
-                          Stol raqami
-                          {validationErrors.tableNumber && <span className="ml-1 text-destructive">*</span>}
-                        </Label>
-                        <div className="mt-1">
-                          <TableSelector
-                            selectedTable={tableNumber}
-                            onSelectTable={setTableNumber}
-                            hasError={validationErrors.tableNumber}
-                          />
-                        </div>
-                        {validationErrors.tableNumber && (
-                          <p className="mt-1 text-xs text-destructive">Iltimos, stol raqamini tanlang</p>
-                        )}
-                      </div>
-
-                      <div>
-                        <Label htmlFor="phone-number">Telefon raqami (ixtiyoriy)</Label>
-                        <Input
-                          id="phone-number"
-                          type="tel"
-                          placeholder="+998 XX XXX XX XX"
-                          value={phoneNumber}
-                          onChange={(e) => setPhoneNumber(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                    </TabsContent>
-
-                    {/* Modify the TabsContent for delivery to add validation styling */}
-                    <TabsContent value="delivery" className="space-y-4">
-                      <div>
-                        <Label
-                          htmlFor="delivery-phone"
-                          className={`required ${validationErrors.phoneNumber ? "text-destructive" : ""}`}
+                          Stol/Xona buyurtmasi
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="delivery"
+                          disabled={!isDeliveryAvailable && !hasAvailableTables && !hasAvailableRooms}
                         >
-                          Telefon raqami
-                          {validationErrors.phoneNumber && <span className="ml-1 text-destructive">*</span>}
-                        </Label>
-                        <Input
-                          id="delivery-phone"
-                          type="tel"
-                          placeholder="+998 XX XXX XX XX"
-                          value={phoneNumber}
-                          onChange={(e) => setPhoneNumber(e.target.value)}
-                          className={`mt-1 ${validationErrors.phoneNumber ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                          required
-                        />
-                        {validationErrors.phoneNumber && (
-                          <p className="mt-1 text-xs text-destructive">Telefon raqami kiritilishi shart</p>
-                        )}
-                      </div>
+                          Yetkazib berish
+                        </TabsTrigger>
+                      </TabsList>
 
-                      <div>
-                        <Label
-                          htmlFor="delivery-address"
-                          className={`required ${validationErrors.address ? "text-destructive" : ""}`}
-                        >
-                          Yetkazib berish manzili
-                          {validationErrors.address && <span className="ml-1 text-destructive">*</span>}
-                        </Label>
-                        <Textarea
-                          id="delivery-address"
-                          placeholder="To'liq manzilni kiriting"
-                          value={address}
-                          onChange={(e) => setAddress(e.target.value)}
-                          className={`mt-1 ${validationErrors.address ? "border-destructive focus-visible:ring-destructive" : ""}`}
-                          required
-                        />
-                        {validationErrors.address && (
-                          <p className="mt-1 text-xs text-destructive">Manzil kiritilishi shart</p>
+                      {/* Table selection tab content */}
+                      <TabsContent value="table" className="space-y-4">
+                        {!hasAvailableTables && !hasAvailableRooms ? (
+                          <Alert variant="destructive" className="mb-4">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertTitle>Stollar va xonalar mavjud emas</AlertTitle>
+                            <AlertDescription>
+                              Hozirda bo'sh stollar va xonalar mavjud emas. Iltimos, yetkazib berish xizmatidan
+                              foydalaning.
+                            </AlertDescription>
+                          </Alert>
+                        ) : (
+                          <>
+                            <div>
+                              <Label
+                                htmlFor="table-number"
+                                className={validationErrors.tableOrRoom ? "text-destructive" : ""}
+                              >
+                                Stol yoki xona
+                                {validationErrors.tableOrRoom && <span className="ml-1 text-destructive">*</span>}
+                              </Label>
+                              <div className="mt-1">
+                                <TableSelector
+                                  selectedTable={tableNumber}
+                                  selectedRoom={roomNumber}
+                                  onSelectTable={handleSelectTableOrRoom}
+                                  hasError={validationErrors.tableOrRoom}
+                                />
+                              </div>
+                              {validationErrors.tableOrRoom && (
+                                <p className="mt-1 text-xs text-destructive">Iltimos, stol yoki xona tanlang</p>
+                              )}
+                            </div>
+
+                            <div>
+                              <Label htmlFor="phone-number">Telefon raqami (ixtiyoriy)</Label>
+                              <Input
+                                id="phone-number"
+                                type="tel"
+                                placeholder="+998 XX XXX XX XX"
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value)}
+                                className="mt-1"
+                              />
+                            </div>
+                          </>
                         )}
-                      </div>
-                    </TabsContent>
-                  </Tabs>
+                      </TabsContent>
+
+                      {/* Delivery tab content */}
+                      <TabsContent value="delivery" className="space-y-4">
+                        {!isDeliveryAvailable ? (
+                          <Alert variant="destructive" className="mb-4">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertTitle>Yetkazib berish mavjud emas</AlertTitle>
+                            <AlertDescription>
+                              Hozirda yetkazib berish xizmati mavjud emas. Iltimos, stol buyurtmasidan foydalaning.
+                            </AlertDescription>
+                          </Alert>
+                        ) : (
+                          <>
+                            <div>
+                              <Label
+                                htmlFor="delivery-phone"
+                                className={`required ${validationErrors.phoneNumber ? "text-destructive" : ""}`}
+                              >
+                                Telefon raqami
+                                {validationErrors.phoneNumber && <span className="ml-1 text-destructive">*</span>}
+                              </Label>
+                              <Input
+                                id="delivery-phone"
+                                type="tel"
+                                placeholder="+998 XX XXX XX XX"
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value)}
+                                className={`mt-1 ${validationErrors.phoneNumber ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                                required
+                              />
+                              {validationErrors.phoneNumber && (
+                                <p className="mt-1 text-xs text-destructive">Telefon raqami kiritilishi shart</p>
+                              )}
+                            </div>
+
+                            <div>
+                              <Label
+                                htmlFor="delivery-address"
+                                className={`required ${validationErrors.address ? "text-destructive" : ""}`}
+                              >
+                                Yetkazib berish manzili
+                                {validationErrors.address && <span className="ml-1 text-destructive">*</span>}
+                              </Label>
+                              <Textarea
+                                id="delivery-address"
+                                placeholder="To'liq manzilni kiriting"
+                                value={address}
+                                onChange={(e) => setAddress(e.target.value)}
+                                className={`mt-1 ${validationErrors.address ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                                required
+                              />
+                              {validationErrors.address && (
+                                <p className="mt-1 text-xs text-destructive">Manzil kiritilishi shart</p>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </TabsContent>
+                    </Tabs>
+                  )}
                 </CardContent>
                 <CardFooter className="flex flex-col">
                   <div className="mb-4 w-full rounded-lg bg-muted p-4">
@@ -372,7 +651,12 @@ export function CartPage() {
                   <Button
                     className="w-full"
                     size="lg"
-                    disabled={isSubmitting || items.length === 0}
+                    disabled={
+                      isSubmitting ||
+                      items.length === 0 ||
+                      (orderType === "table" && !hasAvailableTables && !hasAvailableRooms) ||
+                      (orderType === "delivery" && !isDeliveryAvailable)
+                    }
                     onClick={handlePlaceOrder}
                   >
                     {isSubmitting ? (

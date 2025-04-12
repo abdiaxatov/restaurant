@@ -10,11 +10,14 @@ export interface MenuItem {
   remainingServings?: number // For tracking available portions
   quantity?: number // For inventory tracking
   createdAt?: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface Category {
   id: string
   name: string
+  createdAt?: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface CartItem extends MenuItem {
@@ -25,6 +28,7 @@ export interface Order {
   id?: string
   orderType: "table" | "delivery"
   tableNumber?: number | null
+  roomNumber?: number | null
   phoneNumber?: string | null
   address?: string | null
   items: {
@@ -36,6 +40,7 @@ export interface Order {
   total: number
   status: string
   createdAt: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface User {
@@ -44,26 +49,32 @@ export interface User {
   email: string
   role: "admin" | "chef" | "oshpaz" | "waiter" | "ofitsiant"
   createdAt: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface Table {
   id: string
   number: number
-  isOccupied: boolean
+  seats: number
+  status: "available" | "occupied" | "reserved"
   roomId?: string | null
   tableTypeId?: string | null
   createdAt: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface Room {
   id: string
   name: string
+  capacity: number
   createdAt: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }
 
 export interface TableType {
   id: string
   name: string
-  capacity: number
+  seats: number
   createdAt: any // Firestore timestamp
+  updatedAt?: any // Firestore timestamp
 }

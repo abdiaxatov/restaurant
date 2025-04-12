@@ -181,7 +181,11 @@ export function ChefPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">
-                      {order.orderType === "table" ? `Stol #${order.tableNumber}` : "Yetkazib berish"}
+                      {order.roomNumber
+                        ? `Xona #${order.roomNumber}`
+                        : order.orderType === "table"
+                          ? `Stol #${order.tableNumber}`
+                          : "Yetkazib berish"}
                     </CardTitle>
                     <Badge className={order.status === "pending" ? "bg-yellow-500" : "bg-blue-500"}>
                       {order.status === "pending" ? "Kutilmoqda" : "Tayyorlanmoqda"}

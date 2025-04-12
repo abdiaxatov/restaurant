@@ -157,6 +157,13 @@ export function OrderHistory() {
   return (
     <div className="space-y-4">
       <Tabs defaultValue="all" onValueChange={setStatusFilter}>
+        <TabsList className="mb-4 w-full flex-wrap">
+          <TabsTrigger value="all">Barchasi</TabsTrigger>
+          <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
+          <TabsTrigger value="preparing">Tayyorlanmoqda</TabsTrigger>
+          <TabsTrigger value="ready">Tayyor</TabsTrigger>
+          <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
+        </TabsList>
       </Tabs>
 
       <div className="space-y-4">
@@ -168,7 +175,13 @@ export function OrderHistory() {
           >
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between text-lg">
-                <span>{order.orderType === "table" ? `Stol #${order.tableNumber}` : "Yetkazib berish"}</span>
+                {order.roomNumber ? (
+                  <span>Xona #{order.roomNumber}</span>
+                ) : order.orderType === "table" ? (
+                  <span>Stol #{order.tableNumber}</span>
+                ) : (
+                  <span>Yetkazib berish</span>
+                )}
                 <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-base font-normal">
                   {getStatusIcon(order.status)}
                   <span className="capitalize">{getStatusText(order.status)}</span>

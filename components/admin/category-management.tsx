@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from "firebase/firestore"
+import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/use-toast"
-import { Edit, Plus, Trash2, X, Check } from "lucide-react"
+import { Edit, Plus, Trash2, X, Check, Loader2 } from "lucide-react"
 import type { Category } from "@/types"
 
 export function CategoryManagement() {
@@ -29,10 +29,11 @@ export function CategoryManagement() {
   const [editedName, setEditedName] = useState("")
   const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
   useEffect(() => {
-    const categoriesQuery = collection(db, "categories")
+    const categoriesQuery = query(collection(db, "categories"), orderBy("name"))
 
     const unsubscribe = onSnapshot(
       categoriesQuery,
@@ -41,9 +42,8 @@ export function CategoryManagement() {
         snapshot.forEach((doc) => {
           categoriesData.push({ id: doc.id, ...doc.data() } as Category)
         })
-        // Sort alphabetically
-        categoriesData.sort((a, b) => a.name.localeCompare(b.name))
         setCategories(categoriesData)
+        setIsLoading(false)
       },
       (error) => {
         console.error("Error fetching categories:", error)
@@ -52,6 +52,7 @@ export function CategoryManagement() {
           description: "Kategoriyalarni yuklashda xatolik yuz berdi.",
           variant: "destructive",
         })
+        setIsLoading(false)
       },
     )
 
@@ -75,6 +76,7 @@ export function CategoryManagement() {
     try {
       await addDoc(collection(db, "categories"), {
         name: newCategory.trim(),
+        createdAt: new Date(),
       })
 
       toast({
@@ -120,6 +122,7 @@ export function CategoryManagement() {
     try {
       await updateDoc(doc(db, "categories", categoryId), {
         name: editedName.trim(),
+        updatedAt: new Date(),
       })
 
       toast({
@@ -186,14 +189,29 @@ export function CategoryManagement() {
                 className="flex-1"
               />
               <Button type="submit" disabled={isSubmitting || !newCategory.trim()}>
-                <Plus className="mr-2 h-4 w-4" />
-                Qo'shish
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Qo'shilmoqda...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Qo'shish
+                  </>
+                )}
               </Button>
             </form>
           </div>
 
-          {categories.length === 0 ? (
-            <p className="text-center text-muted-foreground">Hech qanday kategoriya topilmadi</p>
+          {isLoading ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : categories.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <p className="text-muted-foreground">Hech qanday kategoriya topilmadi</p>
+            </div>
           ) : (
             <div className="space-y-2">
               {categories.map((category) => (
@@ -212,7 +230,7 @@ export function CategoryManagement() {
                         onClick={() => handleSaveEdit(category.id)}
                         disabled={isSubmitting}
                       >
-                        <Check className="h-4 w-4" />
+                        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                       </Button>
                       <Button size="sm" variant="ghost" onClick={handleCancelEdit} disabled={isSubmitting}>
                         <X className="h-4 w-4" />
@@ -264,7 +282,14 @@ export function CategoryManagement() {
               disabled={isSubmitting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isSubmitting ? "O'chirilmoqda..." : "O'chirish"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  O'chirilmoqda...
+                </>
+              ) : (
+                "O'chirish"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -102,22 +102,48 @@ export function WaiterPage() {
     }
   }, [toast, router])
 
+  // Update the handleCompleteOrder function to handle room orders
   const handleCompleteOrder = async (orderId: string) => {
     setProcessingOrderId(orderId)
 
     try {
-      await updateDoc(doc(db, "orders", orderId), {
-        status: "completed",
-      })
+      // Get the order to check if it has a table or room
+      const orderDoc = await getDoc(doc(db, "orders", orderId))
+      if (orderDoc.exists()) {
+        const orderData = orderDoc.data() as Order
 
-      // Play delivery sound
-      const audio = new Audio("/delivery.mp3")
-      audio.play().catch((e) => console.error("Error playing sound:", e))
+        // Update order status
+        await updateDoc(doc(db, "orders", orderId), {
+          status: "completed",
+        })
 
-      toast({
-        title: "Buyurtma yakunlandi",
-        description: "Buyurtma muvaffaqiyatli yakunlandi",
-      })
+        // If this was a table order, mark the table as available
+        if (orderData.orderType === "table" && orderData.tableNumber) {
+          await markTableAsAvailable(orderData.tableNumber)
+          toast({
+            title: "Stol bo'shatildi",
+            description: `Stol #${orderData.tableNumber} bo'sh holatga o'tkazildi`,
+          })
+        }
+
+        // If this was a room order, mark the room as available
+        if (orderData.orderType === "table" && orderData.roomNumber) {
+          await markRoomAsAvailable(orderData.roomNumber)
+          toast({
+            title: "Xona bo'shatildi",
+            description: `Xona #${orderData.roomNumber} bo'sh holatga o'tkazildi`,
+          })
+        }
+
+        // Play delivery sound
+        const audio = new Audio("/delivery.mp3")
+        audio.play().catch((e) => console.error("Error playing sound:", e))
+
+        toast({
+          title: "Buyurtma yakunlandi",
+          description: "Buyurtma muvaffaqiyatli yakunlandi",
+        })
+      }
     } catch (error) {
       console.error("Error completing order:", error)
       toast({
@@ -130,6 +156,30 @@ export function WaiterPage() {
     }
   }
 
+  // Add function to mark a room as available
+  const markRoomAsAvailable = async (roomNumber: number) => {
+    try {
+      const roomsCollection = collection(db, "rooms")
+      const q = query(roomsCollection, where("number", "==", roomNumber))
+      const querySnapshot = await getDocs(q)
+
+      if (!querySnapshot.empty) {
+        querySnapshot.forEach(async (roomDoc) => {
+          await updateDoc(roomDoc.ref, { status: "available" })
+        })
+      } else {
+        console.log(`Room with number ${roomNumber} not found.`)
+      }
+    } catch (error) {
+      console.error("Error marking room as available:", error)
+      toast({
+        title: "Xatolik",
+        description: "Xonani bo'sh holatga o'tkazishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
+  }
+
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "N/A"
 
@@ -139,6 +189,29 @@ export function WaiterPage() {
       minute: "numeric",
       hour12: false,
     }).format(date)
+  }
+
+  const markTableAsAvailable = async (tableNumber: number) => {
+    try {
+      const tablesCollection = collection(db, "tables")
+      const q = query(tablesCollection, where("tableNumber", "==", tableNumber))
+      const querySnapshot = await getDocs(q)
+
+      if (!querySnapshot.empty) {
+        querySnapshot.forEach(async (tableDoc) => {
+          await updateDoc(tableDoc.ref, { isAvailable: true })
+        })
+      } else {
+        console.log(`Table with number ${tableNumber} not found.`)
+      }
+    } catch (error) {
+      console.error("Error marking table as available:", error)
+      toast({
+        title: "Xatolik",
+        description: "Stolni bo'sh holatga o'tkazishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
   }
 
   return (
@@ -181,7 +254,11 @@ export function WaiterPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">
-                      {order.orderType === "table" ? `Stol #${order.tableNumber}` : "Yetkazib berish"}
+                      {order.roomNumber
+                        ? `Xona #${order.roomNumber}`
+                        : order.orderType === "table"
+                          ? `Stol #${order.tableNumber}`
+                          : "Yetkazib berish"}
                     </CardTitle>
                     <Badge className="bg-green-500">Tayyor</Badge>
                   </div>
@@ -245,3 +322,5 @@ export function WaiterPage() {
     </AdminLayout>
   )
 }
+
+import { getDocs } from "firebase/firestore"
