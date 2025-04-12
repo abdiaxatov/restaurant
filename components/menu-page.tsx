@@ -10,7 +10,7 @@ import { MenuGrid } from "@/components/menu-grid"
 import { CartButton } from "@/components/cart-button"
 import { ViewMyOrdersButton } from "@/components/view-my-orders-button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { OrderHistory } from "@/components/order-history"
 import type { MenuItem, Category } from "@/types"
 
@@ -27,7 +27,7 @@ export function MenuPage() {
   useEffect(() => {
     const fetchMenuItems = async () => {
       try {
-        // Fetch categories first
+        // Fetch categories
         const categoriesSnapshot = await getDocs(collection(db, "categories"))
         const categoriesData: Category[] = []
         categoriesSnapshot.forEach((doc) => {
@@ -86,9 +86,17 @@ export function MenuPage() {
     setSelectedCategory(categoryId)
   }
 
-  // Check if user has any orders
+  // Fallback for when localStorage might not work properly
   const hasOrders =
-    typeof localStorage !== "undefined" && JSON.parse(localStorage.getItem("myOrders") || "[]").length > 0
+    typeof localStorage !== "undefined" &&
+    (() => {
+      try {
+        const orders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        return orders.length > 0
+      } catch {
+        return false
+      }
+    })()
 
   return (
     <div className="flex min-h-screen flex-col pb-20">
@@ -97,56 +105,45 @@ export function MenuPage() {
         <div className="mb-4">
           <SearchBar onSearch={handleSearch} />
         </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "menu" | "orders")}>
+          <TabsList className="w-full">
+            <TabsTrigger value="menu" className="flex-1">
+              Menyu
+            </TabsTrigger>
+            <TabsTrigger value="orders" className="flex-1">
+              Buyurtmalarim
+            </TabsTrigger>
+          </TabsList>
 
-        {hasOrders && (
-          <Tabs defaultValue="menu" onValueChange={(value) => setActiveTab(value as "menu" | "orders")}>
-            <TabsList className="w-full">
-              <TabsTrigger value="menu" className="flex-1">
-                Menyu
-              </TabsTrigger>
-              <TabsTrigger value="orders" className="flex-1">
-                Buyurtmalarim
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        )}
+          <TabsContent value="menu">
+            {isLoading ? <MenuLoadingSkeleton /> : <MenuGrid items={filteredItems} />}
+          </TabsContent>
+
+          <TabsContent value="orders">
+            {isLoading ? <MenuLoadingSkeleton /> : <OrderHistory />}
+          </TabsContent>
+        </Tabs>
       </header>
 
-      <main className="flex-1 p-4">
-        {hasOrders ? (
-          activeTab === "menu" ? (
-            isLoading ? (
-              <MenuLoadingSkeleton />
-            ) : (
-              <MenuGrid items={filteredItems} />
-            )
-          ) : (
-            <OrderHistory />
-          )
-        ) : isLoading ? (
-          <MenuLoadingSkeleton />
-        ) : (
-          <MenuGrid items={filteredItems} />
-        )}
-      </main>
-
       {/* Bottom category filter - only show in menu tab */}
-      {(!hasOrders || activeTab === "menu") && (
-        <div className="fixed bottom-0 left-0 right-0 z-10 bg-white p-4 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
-          <div className="overflow-x-auto pb-1">
-            <CategoryFilter
-              categories={categories}
-              selectedCategory={selectedCategory}
-              onSelectCategory={handleCategorySelect}
-            />
+      {activeTab === "menu" && (
+        <>
+          <div className="fixed bottom-0 left-0 right-0 z-10 bg-white p-4 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
+            <div className="overflow-x-auto pb-1">
+              <CategoryFilter
+                categories={categories}
+                selectedCategory={selectedCategory}
+                onSelectCategory={handleCategorySelect}
+              />
+            </div>
           </div>
-        </div>
+          <div className="fixed bottom-16 right-4">
+            <CartButton />
+          </div>
+        </>
       )}
 
-      {/* Floating cart button - only show in menu tab */}
-      {(!hasOrders || activeTab === "menu") && <CartButton />}
-
-      {/* View my orders button - only show in menu tab if not using tabs */}
+      {/* View my orders button */}
       {!hasOrders && <ViewMyOrdersButton />}
     </div>
   )
