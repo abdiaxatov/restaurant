@@ -157,9 +157,6 @@ export function OrderHistory() {
       <Tabs defaultValue="all" onValueChange={setStatusFilter}>
         <TabsList className="mb-4 w-full flex-wrap">
           <TabsTrigger value="all">Barchasi</TabsTrigger>
-          <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
-          <TabsTrigger value="preparing">Tayyorlanmoqda</TabsTrigger>
-          <TabsTrigger value="ready">Tayyor</TabsTrigger>
           <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
         </TabsList>
       </Tabs>
