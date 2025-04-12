@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from "firebase/firestore"
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,13 +10,14 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, MapPin, Home, Phone } from "lucide-react"
+import { Clock, CheckCircle, MapPin, Home, Phone, Loader2 } from "lucide-react"
 import type { Order } from "@/types"
 
 export function WaiterPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [activeTab, setActiveTab] = useState("ready")
   const [isLoading, setIsLoading] = useState(true)
+  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
@@ -73,10 +74,28 @@ export function WaiterPage() {
   const handleUpdateStatus = async (orderId: string | undefined, newStatus: string) => {
     if (!orderId) return
 
+    setProcessingOrderId(orderId)
+
     try {
+      const updatedAt = new Date()
+
+      // Update local state immediately for instant UI feedback
+      setOrders((prevOrders) =>
+        prevOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                status: newStatus,
+                updatedAt: Timestamp.fromDate(updatedAt),
+              }
+            : order,
+        ),
+      )
+
+      // Then update in Firestore
       await updateDoc(doc(db, "orders", orderId), {
         status: newStatus,
-        updatedAt: new Date(),
+        updatedAt: updatedAt,
       })
 
       // Play sound for status change
@@ -87,13 +106,24 @@ export function WaiterPage() {
         title: "Status yangilandi",
         description: `Buyurtma statusi ${newStatus === "completed" ? "Yakunlangan" : newStatus} ga o'zgartirildi.`,
       })
+
+      // If the status is "completed", switch to the "completed" tab
+      if (newStatus === "completed") {
+        setActiveTab("completed")
+      }
     } catch (error) {
       console.error("Error updating order status:", error)
+
+      // Revert the local state change if the update failed
+      setOrders((prevOrders) => [...prevOrders])
+
       toast({
         title: "Xatolik",
         description: "Buyurtma statusini yangilashda xatolik yuz berdi.",
         variant: "destructive",
       })
+    } finally {
+      setProcessingOrderId(null)
     }
   }
 
@@ -146,7 +176,7 @@ export function WaiterPage() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {readyOrders.map((order) => (
                     <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-muted/50 p-4">
+                      <CardHeader className="bg-green-50 p-4 border-b border-green-200">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             {order.orderType === "delivery" ? (
@@ -200,13 +230,28 @@ export function WaiterPage() {
                             </li>
                           ))}
                         </ul>
+                        <div className="border-t pt-3 mb-4">
+                          <div className="flex justify-between font-medium">
+                            <span>Jami:</span>
+                            <span>{formatCurrency(order.total)}</span>
+                          </div>
+                        </div>
                         <Button
-                          className="w-full"
-                          variant="default"
+                          className="w-full bg-green-500 hover:bg-green-600"
                           onClick={() => handleUpdateStatus(order.id, "completed")}
+                          disabled={processingOrderId === order.id}
                         >
-                          <CheckCircle className="mr-2 h-4 w-4" />
-                          Yakunlash
+                          {processingOrderId === order.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Jarayonda...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="mr-2 h-4 w-4" />
+                              Yakunlash
+                            </>
+                          )}
                         </Button>
                       </CardContent>
                     </Card>
@@ -227,7 +272,7 @@ export function WaiterPage() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {completedOrders.map((order) => (
                     <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-muted/50 p-4">
+                      <CardHeader className="bg-gray-50 p-4 border-b border-gray-200">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             {order.orderType === "delivery" ? (
@@ -281,7 +326,12 @@ export function WaiterPage() {
                             </li>
                           ))}
                         </ul>
-                        <div className="text-right font-medium">Jami: {formatCurrency(order.total)}</div>
+                        <div className="border-t pt-3">
+                          <div className="flex justify-between font-medium">
+                            <span>Jami:</span>
+                            <span>{formatCurrency(order.total)}</span>
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}

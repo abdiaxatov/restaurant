@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from "firebase/firestore"
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,13 +10,14 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, MapPin, Home } from "lucide-react"
+import { Clock, CheckCircle, MapPin, Home, Loader2 } from "lucide-react"
 import type { Order } from "@/types"
 
 export function ChefPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [activeTab, setActiveTab] = useState("pending")
   const [isLoading, setIsLoading] = useState(true)
+  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
@@ -73,10 +74,28 @@ export function ChefPage() {
   const handleUpdateStatus = async (orderId: string | undefined, newStatus: string) => {
     if (!orderId) return
 
+    setProcessingOrderId(orderId)
+
     try {
+      const updatedAt = new Date()
+
+      // Update local state immediately for instant UI feedback
+      setOrders((prevOrders) =>
+        prevOrders.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                status: newStatus,
+                updatedAt: Timestamp.fromDate(updatedAt),
+              }
+            : order,
+        ),
+      )
+
+      // Then update in Firestore
       await updateDoc(doc(db, "orders", orderId), {
         status: newStatus,
-        updatedAt: new Date(),
+        updatedAt: updatedAt,
       })
 
       // Play sound for status change
@@ -87,13 +106,24 @@ export function ChefPage() {
         title: "Status yangilandi",
         description: `Buyurtma statusi ${newStatus === "preparing" ? "Tayyorlanmoqda" : "Tayyor"} ga o'zgartirildi.`,
       })
+
+      // If the status is "ready", switch to the "preparing" tab
+      if (newStatus === "ready") {
+        setActiveTab("preparing")
+      }
     } catch (error) {
       console.error("Error updating order status:", error)
+
+      // Revert the local state change if the update failed
+      setOrders((prevOrders) => [...prevOrders])
+
       toast({
         title: "Xatolik",
         description: "Buyurtma statusini yangilashda xatolik yuz berdi.",
         variant: "destructive",
       })
+    } finally {
+      setProcessingOrderId(null)
     }
   }
 
@@ -146,67 +176,7 @@ export function ChefPage() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {pendingOrders.map((order) => (
                     <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-muted/50 p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {order.orderType === "delivery" ? (
-                              <CardTitle className="text-base flex items-center">
-                                <MapPin className="h-4 w-4 mr-1" />
-                                Yetkazib berish
-                              </CardTitle>
-                            ) : order.roomNumber ? (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Xona #{order.roomNumber}
-                              </CardTitle>
-                            ) : (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Stol #{order.tableNumber}
-                              </CardTitle>
-                            )}
-                            <Badge variant="outline">{formatDate(order.createdAt)}</Badge>
-                          </div>
-                          <Badge variant="secondary">#{order.id?.slice(-4)}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <ul className="mb-4 space-y-2">
-                          {order.items.map((item, index) => (
-                            <li key={index} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="h-6 w-6 p-0 flex items-center justify-center">
-                                  {item.quantity}
-                                </Badge>
-                                <span>{item.name}</span>
-                              </div>
-                              <span className="text-sm text-muted-foreground">{formatCurrency(item.price)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        <Button className="w-full" onClick={() => handleUpdateStatus(order.id, "preparing")}>
-                          Tayyorlashni boshlash
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="preparing" className="mt-0">
-              {isLoading ? (
-                <p>Buyurtmalar yuklanmoqda...</p>
-              ) : preparingOrders.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center">
-                  <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-                  <p className="text-muted-foreground">Hozirda tayyorlanayotgan buyurtmalar yo'q</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {preparingOrders.map((order) => (
-                    <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-muted/50 p-4">
+                      <CardHeader className="bg-yellow-50 p-4 border-b border-yellow-200">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             {order.orderType === "delivery" ? (
@@ -245,12 +215,92 @@ export function ChefPage() {
                           ))}
                         </ul>
                         <Button
-                          className="w-full"
-                          variant="default"
-                          onClick={() => handleUpdateStatus(order.id, "ready")}
+                          className="w-full bg-blue-500 hover:bg-blue-600"
+                          onClick={() => handleUpdateStatus(order.id, "preparing")}
+                          disabled={processingOrderId === order.id}
                         >
-                          <CheckCircle className="mr-2 h-4 w-4" />
-                          Tayyor
+                          {processingOrderId === order.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Jarayonda...
+                            </>
+                          ) : (
+                            "Tayyorlashni boshlash"
+                          )}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="preparing" className="mt-0">
+              {isLoading ? (
+                <p>Buyurtmalar yuklanmoqda...</p>
+              ) : preparingOrders.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center">
+                  <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">Hozirda tayyorlanayotgan buyurtmalar yo'q</p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {preparingOrders.map((order) => (
+                    <Card key={order.id} className="overflow-hidden">
+                      <CardHeader className="bg-blue-50 p-4 border-b border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {order.orderType === "delivery" ? (
+                              <CardTitle className="text-base flex items-center">
+                                <MapPin className="h-4 w-4 mr-1" />
+                                Yetkazib berish
+                              </CardTitle>
+                            ) : order.roomNumber ? (
+                              <CardTitle className="text-base flex items-center">
+                                <Home className="h-4 w-4 mr-1" />
+                                Xona #{order.roomNumber}
+                              </CardTitle>
+                            ) : (
+                              <CardTitle className="text-base flex items-center">
+                                <Home className="h-4 w-4 mr-1" />
+                                Stol #{order.tableNumber}
+                              </CardTitle>
+                            )}
+                            <Badge variant="outline">{formatDate(order.createdAt)}</Badge>
+                          </div>
+                          <Badge variant="secondary">#{order.id?.slice(-4)}</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <ul className="mb-4 space-y-2">
+                          {order.items.map((item, index) => (
+                            <li key={index} className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="h-6 w-6 p-0 flex items-center justify-center">
+                                  {item.quantity}
+                                </Badge>
+                                <span>{item.name}</span>
+                              </div>
+                              <span className="text-sm text-muted-foreground">{formatCurrency(item.price)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          className="w-full bg-green-500 hover:bg-green-600"
+                          onClick={() => handleUpdateStatus(order.id, "ready")}
+                          disabled={processingOrderId === order.id}
+                        >
+                          {processingOrderId === order.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Jarayonda...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="mr-2 h-4 w-4" />
+                              Tayyor
+                            </>
+                          )}
                         </Button>
                       </CardContent>
                     </Card>
