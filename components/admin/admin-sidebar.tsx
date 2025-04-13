@@ -148,19 +148,9 @@ const adminRoutes = [
     icon: UserPlus,
   },
   {
-    title: "Stollar",
-    href: "/admin/tables",
-    icon: Table,
-  },
-  {
     title: "Sozlamalar",
     href: "/admin/settings",
     icon: Settings,
-  },
-  {
-    title: "Buyurtmalar tarixi",
-    href: "/admin/order-history",
-    icon: History,
   },
   {
     title: "Oshpaz",
@@ -171,6 +161,11 @@ const adminRoutes = [
     title: "Ofitsiant",
     href: "/admin/waiter",
     icon: User,
+  },
+  {
+    title: "Buyurtmalar tarixi",
+    href: "/admin/order-history",
+    icon: History,
   },
 ]
 
