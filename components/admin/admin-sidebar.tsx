@@ -133,14 +133,9 @@ const adminRoutes = [
     icon: Utensils,
   },
   {
-    title: "Oshpaz",
-    href: "/admin/chef",
-    icon: ChefHat,
-  },
-  {
-    title: "Ofitsiant",
-    href: "/admin/waiter",
-    icon: User,
+    title: "Stollar",
+    href: "/admin/tables",
+    icon: Table,
   },
   {
     title: "Statistika",
@@ -166,6 +161,16 @@ const adminRoutes = [
     title: "Buyurtmalar tarixi",
     href: "/admin/order-history",
     icon: History,
+  },
+  {
+    title: "Oshpaz",
+    href: "/admin/chef",
+    icon: ChefHat,
+  },
+  {
+    title: "Ofitsiant",
+    href: "/admin/waiter",
+    icon: User,
   },
 ]
 
