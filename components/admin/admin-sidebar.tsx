@@ -284,7 +284,7 @@ export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) =
         </aside>
 
         {/* Main content area with left margin for sidebar */}
-        <main className="w-full overflow-auto p-6 md:ml-64">{children}</main>
+        <main className="w-full  p-6 md:ml-64">{children}</main>
 
         {/* Mobile sidebar for admin */}
         {isMobileMenuOpen && (

@@ -1,5 +1,4 @@
 "use client"
-
 import { useState, useEffect, useRef } from "react"
 import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
@@ -11,7 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
-import { ShoppingBag, DollarSign, Clock, Truck } from "lucide-react"
+import { ShoppingBag, DollarSign, Clock, Truck, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import type { Order } from "@/types"
 
@@ -227,7 +226,7 @@ export function AdminDashboard() {
               </TabsList>
             </Tabs>
 
-            <div className="flex gap-2 overflow-x-auto pb-2">
+            <div className="flex gap-2  pb-2">
               <button
                 onClick={() => setStatusFilter("all")}
                 className={`rounded-md px-3 py-1 text-sm ${
@@ -284,7 +283,10 @@ export function AdminDashboard() {
           </div>
 
           {isLoading ? (
-            <p>Buyurtmalar yuklanmoqda...</p>
+                  <div className="flex min-h-screen flex-col items-center justify-center">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <p className="mt-4 text-muted-foreground"> Buyurtmalar yuklanmoqda...</p>
+                  </div>
           ) : (
             <OrderList orders={filteredOrders} selectedOrderId={selectedOrder?.id} onSelectOrder={handleSelectOrder} />
           )}

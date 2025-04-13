@@ -166,7 +166,10 @@ export function WaiterPage() {
 
             <TabsContent value="ready" className="mt-0">
               {isLoading ? (
-                <p>Buyurtmalar yuklanmoqda...</p>
+                                      <div className="flex min-h-screen flex-col items-center justify-center">
+                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
+                                    </div>
               ) : readyOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -262,7 +265,10 @@ export function WaiterPage() {
 
             <TabsContent value="completed" className="mt-0">
               {isLoading ? (
-                <p>Buyurtmalar yuklanmoqda...</p>
+                                      <div className="flex min-h-screen flex-col items-center justify-center">
+                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
+                                    </div>
               ) : completedOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
