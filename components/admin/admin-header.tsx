@@ -52,10 +52,6 @@ export function AdminHeader() {
           </h1>
         </div>
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon">
-            <Bell className="h-5 w-5" />
-            <span className="sr-only">Notifications</span>
-          </Button>
           <div className="text-sm font-medium">{displayName ? `Salom, ${displayName}` : "Xush kelibsiz"}</div>
         </div>
       </header>
@@ -87,7 +83,7 @@ export function AdminHeader() {
         <h1 className="text-xl font-semibold">Admin Panel</h1>
       </div>
       <div className="flex items-center gap-4">
-        <div className="text-sm font-medium">{displayName ? `${displayName}` : "Xush kelibsiz"}</div>
+      <div className="text-sm font-medium">{displayName ? `Salom, ${displayName}` : "Xush kelibsiz"}</div>
       </div>
     </header>
   )
