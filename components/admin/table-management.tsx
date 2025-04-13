@@ -1308,22 +1308,6 @@ export function TableManagement() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="editTableRoom">Xona</Label>
-                    <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
-                      <SelectTrigger id="editTableRoom">
-                        <SelectValue placeholder="Xonani tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Xonasiz</SelectItem>
-                        {rooms.map((room) => (
-                          <SelectItem key={room.id} value={room.id}>
-                            {room.number} xona
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="editTableStatus">Status</Label>
                     <Select
                       value={newTableStatus}
