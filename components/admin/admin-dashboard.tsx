@@ -1,6 +1,20 @@
 "use client"
+
+import { Button } from "@/components/ui/button"
+
 import { useState, useEffect, useRef } from "react"
-import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  where,
+  getDocs,
+  doc,
+  deleteDoc,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { OrderList } from "@/components/admin/order-list"
@@ -11,7 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
 import { ShoppingBag, DollarSign, Clock, Truck, Loader2 } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import type { Order } from "@/types"
 
 export function AdminDashboard() {
@@ -24,6 +38,9 @@ export function AdminDashboard() {
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   useEffect(() => {
     // Initialize audio element
@@ -108,6 +125,49 @@ export function AdminDashboard() {
   const handleOrderDetailsClose = () => {
     setIsOrderDetailsOpen(false)
     setSelectedOrder(null)
+  }
+
+  // Handle delete button click
+  const handleDeleteClick = (order: Order) => {
+    setOrderToDelete(order)
+    setIsDeleteDialogOpen(true)
+  }
+
+  // Handle delete confirmation
+  const handleDeleteConfirm = async () => {
+    if (!orderToDelete || !orderToDelete.id) return
+
+    setIsDeleting(true)
+    try {
+      // Before deleting, add the order to orderHistory collection
+      await addDoc(collection(db, "orderHistory"), {
+        ...orderToDelete,
+        deletedAt: serverTimestamp(),
+        deletedBy: "admin", // You could add user info here if available
+      })
+
+      // Now delete the original order
+      await deleteDoc(doc(db, "orders", orderToDelete.id))
+
+      // Play delete sound
+      const audio = new Audio("/click.mp3")
+      audio.play().catch((e) => console.error("Error playing sound:", e))
+
+      toast({
+        title: "Buyurtma o'chirildi",
+        description: "Buyurtma muvaffaqiyatli o'chirildi va tarixga saqlandi",
+      })
+      setIsDeleteDialogOpen(false)
+    } catch (error) {
+      console.error("Error deleting order:", error)
+      toast({
+        title: "Xatolik",
+        description: "Buyurtmani o'chirishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   // Filter orders based on status and type
@@ -226,7 +286,7 @@ export function AdminDashboard() {
               </TabsList>
             </Tabs>
 
-            <div className="flex gap-2  pb-2">
+            <div className="flex gap-2 overflow-x-auto pb-2">
               <button
                 onClick={() => setStatusFilter("all")}
                 className={`rounded-md px-3 py-1 text-sm ${
@@ -283,12 +343,14 @@ export function AdminDashboard() {
           </div>
 
           {isLoading ? (
-                  <div className="flex min-h-screen flex-col items-center justify-center">
-                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                    <p className="mt-4 text-muted-foreground"> Buyurtmalar yuklanmoqda...</p>
-                  </div>
+            <p>Buyurtmalar yuklanmoqda...</p>
           ) : (
-            <OrderList orders={filteredOrders} selectedOrderId={selectedOrder?.id} onSelectOrder={handleSelectOrder} />
+            <OrderList
+              orders={filteredOrders}
+              selectedOrderId={selectedOrder?.id}
+              onSelectOrder={handleSelectOrder}
+              onDeleteOrder={handleDeleteClick}
+            />
           )}
         </div>
 
@@ -298,6 +360,31 @@ export function AdminDashboard() {
             {/* Add DialogTitle for accessibility */}
             <DialogTitle className="text-lg font-semibold">{selectedOrder ? "Buyurtma tafsilotlari" : ""}</DialogTitle>
             {selectedOrder && <OrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} />}
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent>
+            <DialogTitle>Buyurtmani o'chirishni tasdiqlaysizmi?</DialogTitle>
+            <DialogDescription>
+              Bu amal qaytarib bo'lmaydi. Buyurtma butunlay o'chiriladi va tarixga saqlanadi.
+            </DialogDescription>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
+                Bekor qilish
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    O'chirilmoqda...
+                  </>
+                ) : (
+                  "O'chirish"
+                )}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

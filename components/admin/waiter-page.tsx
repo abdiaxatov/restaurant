@@ -1,34 +1,24 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { collection, query, where, deleteDoc, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+import { OrderDetails } from "@/components/admin/order-details"
+import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/components/ui/use-toast"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, MapPin, Home, Phone, Trash2 } from "lucide-react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+import { Loader2, CheckCircle, AlertTriangle } from "lucide-react"
 import type { Order } from "@/types"
 
 export function WaiterPage() {
   const [orders, setOrders] = useState<Order[]>([])
-  const [activeTab, setActiveTab] = useState("ready")
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("ready")
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
@@ -37,41 +27,25 @@ export function WaiterPage() {
     // Initialize audio element
     audioRef.current = new Audio("/notification.mp3")
 
-    // Query orders that are ready or completed (waiter needs to see these)
-    // Note: We're not using orderBy to avoid index requirements
-    const ordersQuery = query(collection(db, "orders"), where("status", "in", ["ready", "completed"]))
+    // Only get ready orders
+    const ordersQuery = query(collection(db, "orders"), where("status", "==", "ready"), orderBy("createdAt", "desc"))
 
     const unsubscribe = onSnapshot(
       ordersQuery,
       (snapshot) => {
         const ordersList: Order[] = []
         snapshot.forEach((doc) => {
-          const data = doc.data()
-          // Make sure delivery orders don't have table numbers
-          if (data.orderType === "delivery") {
-            data.tableNumber = null
-            data.roomNumber = null
-          }
-          ordersList.push({ id: doc.id, ...data } as Order)
+          ordersList.push({ id: doc.id, ...doc.data() } as Order)
         })
-
-        // Sort orders by createdAt manually
-        ordersList.sort((a, b) => {
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt)
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt)
-          return dateA.getTime() - dateB.getTime()
-        })
-
         setOrders(ordersList)
         setIsLoading(false)
 
         // Check for new ready orders
-        const readyOrders = ordersList.filter((order) => order.status === "ready")
-        if (readyOrders.length > previousOrderCountRef.current) {
+        if (ordersList.length > previousOrderCountRef.current) {
           // Play notification sound
           audioRef.current?.play().catch((e) => console.error("Error playing notification sound:", e))
         }
-        previousOrderCountRef.current = readyOrders.length
+        previousOrderCountRef.current = ordersList.length
       },
       (error) => {
         console.error("Error fetching orders:", error)
@@ -87,297 +61,149 @@ export function WaiterPage() {
     return () => unsubscribe()
   }, [toast])
 
-  const handleUpdateStatus = async (orderId: string | undefined, newStatus: string) => {
-    if (!orderId) return
+  const handleSelectOrder = (order: Order) => {
+    setSelectedOrder(order)
+    setIsOrderDetailsOpen(true)
+  }
 
-    setProcessingOrderId(orderId)
+  const handleOrderDetailsClose = () => {
+    setIsOrderDetailsOpen(false)
+    setSelectedOrder(null)
+  }
 
+  const handleStatusChange = async (orderId: string) => {
     try {
       await updateDoc(doc(db, "orders", orderId), {
-        status: newStatus,
-        updatedAt: Timestamp.now(),
+        status: "completed",
+        updatedAt: new Date(),
       })
 
-      // Play sound for status change
-      const audio = new Audio("/delivery.mp3")
+      // Play success sound
+      const audio = new Audio("/success.mp3")
       audio.play().catch((e) => console.error("Error playing sound:", e))
 
       toast({
         title: "Status yangilandi",
-        description: `Buyurtma statusi ${newStatus === "completed" ? "Yakunlangan" : newStatus} ga o'zgartirildi.`,
+        description: "Buyurtma muvaffaqiyatli yakunlandi",
       })
     } catch (error) {
       console.error("Error updating order status:", error)
       toast({
         title: "Xatolik",
-        description: "Buyurtma statusini yangilashda xatolik yuz berdi.",
+        description: "Buyurtma statusini yangilashda xatolik yuz berdi",
         variant: "destructive",
       })
-    } finally {
-      setProcessingOrderId(null)
     }
-  }
-
-  const handleDeleteOrder = async (orderId: string | undefined) => {
-    if (!orderId) return
-
-    setProcessingOrderId(orderId)
-
-    try {
-      await deleteDoc(doc(db, "orders", orderId))
-
-      toast({
-        title: "Buyurtma o'chirildi",
-        description: "Buyurtma muvaffaqiyatli o'chirildi.",
-      })
-
-      // Play delete sound
-      const audio = new Audio("/click.mp3")
-      audio.play().catch((e) => console.error("Error playing sound:", e))
-    } catch (error) {
-      console.error("Error deleting order:", error)
-      toast({
-        title: "Xatolik",
-        description: "Buyurtmani o'chirishda xatolik yuz berdi.",
-        variant: "destructive",
-      })
-    } finally {
-      setProcessingOrderId(null)
-    }
-  }
-
-  const readyOrders = orders.filter((order) => order.status === "ready")
-  const completedOrders = orders.filter((order) => order.status === "completed")
-
-  const formatDate = (timestamp: any) => {
-    if (!timestamp) return "N/A"
-
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
-    return new Intl.DateTimeFormat("uz-UZ", {
-      hour: "numeric",
-      minute: "numeric",
-    }).format(date)
   }
 
   return (
     <AdminLayout>
       <div className="flex flex-1 flex-col">
         <div className="border-b bg-white p-4">
-          <h1 className="text-2xl font-bold">Ofitsiant</h1>
+          <h1 className="text-2xl font-bold">Ofitsiant paneli</h1>
         </div>
 
         <div className="p-4">
-          <Tabs defaultValue="ready" value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="ready">
-                Tayyor{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {readyOrders.length}
-                </Badge>
-              </TabsTrigger>
-              <TabsTrigger value="completed">
-                Yakunlangan{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {completedOrders.length}
-                </Badge>
-              </TabsTrigger>
-            </TabsList>
+          {isLoading ? (
+            <div className="flex h-60 items-center justify-center">
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="flex h-60 flex-col items-center justify-center rounded-lg border border-dashed">
+              <AlertTriangle className="mb-2 h-10 w-10 text-muted-foreground" />
+              <p className="text-muted-foreground">Tayyor buyurtmalar topilmadi</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {orders.map((order) => (
+                <div
+                  key={order.id}
+                  className="relative overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow"
+                >
+                  {/* Status header */}
+                  <div className="bg-green-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <Badge variant="outline" className="bg-green-100 text-green-800">
+                          Tayyor
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {order.createdAt?.toDate
+                          ? new Date(order.createdAt.toDate()).toLocaleTimeString("uz-UZ", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : ""}
+                      </div>
+                    </div>
+                  </div>
 
-            <TabsContent value="ready" className="mt-0">
-              {isLoading ? (
-                <p>Buyurtmalar yuklanmoqda...</p>
-              ) : readyOrders.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center">
-                  <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-                  <p className="text-muted-foreground">Hozirda tayyor buyurtmalar yo'q</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {readyOrders.map((order) => (
-                    <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-green-50 p-4 border-b border-green-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {order.orderType === "delivery" ? (
-                              <CardTitle className="text-base flex items-center">
-                                <MapPin className="h-4 w-4 mr-1" />
-                                Yetkazib berish
-                              </CardTitle>
-                            ) : order.roomNumber ? (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Xona #{order.roomNumber}
-                              </CardTitle>
-                            ) : (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Stol #{order.tableNumber}
-                              </CardTitle>
-                            )}
-                            <Badge variant="outline">{formatDate(order.createdAt)}</Badge>
-                          </div>
-                          <Badge variant="secondary">#{order.id?.slice(-4)}</Badge>
+                  <div className="p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="font-medium">
+                        {order.orderType === "table"
+                          ? `Stol #${order.tableNumber || "?"}`
+                          : order.orderType === "delivery"
+                            ? "Yetkazib berish"
+                            : "Buyurtma"}
+                      </div>
+                      <div className="font-semibold text-primary">{formatCurrency(order.total)}</div>
+                    </div>
+
+                    <div className="mb-3 text-sm text-muted-foreground">
+                      {order.orderType === "delivery" && (
+                        <div className="mb-1">
+                          <span className="font-medium">Manzil:</span> {order.address}
                         </div>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        {order.orderType === "delivery" && (
-                          <div className="mb-4 rounded-md bg-muted p-3">
-                            {order.phoneNumber && (
-                              <p className="text-sm flex items-center mb-1">
-                                <Phone className="h-3 w-3 mr-1" />
-                                {order.phoneNumber}
-                              </p>
-                            )}
-                            {order.address && (
-                              <p className="text-sm flex items-start">
-                                <MapPin className="h-3 w-3 mr-1 mt-0.5" />
-                                {order.address}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        <ul className="mb-4 space-y-2">
-                          {order.items.map((item, index) => (
-                            <li key={index} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="h-6 w-6 p-0 flex items-center justify-center">
-                                  {item.quantity}
-                                </Badge>
-                                <span>{item.name}</span>
-                              </div>
-                              <span className="text-sm text-muted-foreground">{formatCurrency(item.price)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="border-t pt-3 mb-3">
-                          <div className="flex justify-between font-medium">
-                            <span>Jami:</span>
-                            <span>{formatCurrency(order.total)}</span>
-                          </div>
+                      )}
+                      {order.phoneNumber && (
+                        <div className="mb-1">
+                          <span className="font-medium">Tel:</span> {order.phoneNumber}
                         </div>
-                        <Button
-                          className="w-full"
-                          variant="default"
-                          onClick={() => handleUpdateStatus(order.id, "completed")}
-                          disabled={processingOrderId === order.id}
-                        >
-                          {processingOrderId === order.id ? (
-                            <span className="flex items-center">
-                              <Clock className="animate-spin mr-2 h-4 w-4" />
-                              Jarayonda...
+                      )}
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="mb-1 text-sm font-medium">Buyurtma tarkibi:</div>
+                      <ul className="space-y-1 text-sm">
+                        {order.items.map((item, index) => (
+                          <li key={index} className="flex justify-between">
+                            <span>
+                              {item.quantity} × {item.name}
                             </span>
-                          ) : (
-                            <span className="flex items-center">
-                              <CheckCircle className="mr-2 h-4 w-4" />
-                              Yakunlash
-                            </span>
-                          )}
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
+                            <span className="text-muted-foreground">{formatCurrency(item.price * item.quantity)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
 
-            <TabsContent value="completed" className="mt-0">
-              {isLoading ? (
-                <p>Buyurtmalar yuklanmoqda...</p>
-              ) : completedOrders.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-8 text-center">
-                  <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-                  <p className="text-muted-foreground">Hozirda yakunlangan buyurtmalar yo'q</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {completedOrders.map((order) => (
-                    <Card key={order.id} className="overflow-hidden">
-                      <CardHeader className="bg-gray-50 p-4 border-b border-gray-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {order.orderType === "delivery" ? (
-                              <CardTitle className="text-base flex items-center">
-                                <MapPin className="h-4 w-4 mr-1" />
-                                Yetkazib berish
-                              </CardTitle>
-                            ) : order.roomNumber ? (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Xona #{order.roomNumber}
-                              </CardTitle>
-                            ) : (
-                              <CardTitle className="text-base flex items-center">
-                                <Home className="h-4 w-4 mr-1" />
-                                Stol #{order.tableNumber}
-                              </CardTitle>
-                            )}
-                            <Badge variant="outline">{formatDate(order.createdAt)}</Badge>
-                          </div>
-                          <Badge variant="secondary">#{order.id?.slice(-4)}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        {order.orderType === "delivery" && (
-                          <div className="mb-4 rounded-md bg-muted p-3">
-                            {order.phoneNumber && (
-                              <p className="text-sm flex items-center mb-1">
-                                <Phone className="h-3 w-3 mr-1" />
-                                {order.phoneNumber}
-                              </p>
-                            )}
-                            {order.address && (
-                              <p className="text-sm flex items-start">
-                                <MapPin className="h-3 w-3 mr-1 mt-0.5" />
-                                {order.address}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        <ul className="mb-4 space-y-2">
-                          {order.items.map((item, index) => (
-                            <li key={index} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="h-6 w-6 p-0 flex items-center justify-center">
-                                  {item.quantity}
-                                </Badge>
-                                <span>{item.name}</span>
-                              </div>
-                              <span className="text-sm text-muted-foreground">{formatCurrency(item.price)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="border-t pt-3">
-                          <div className="flex justify-between font-medium">
-                            <span>Jami:</span>
-                            <span>{formatCurrency(order.total)}</span>
-                          </div>
-                        </div>
-                      </CardContent>
-                      <CardFooter className="p-4 pt-0">
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => handleSelectOrder(order)}>
+                        Batafsil
+                      </Button>
 
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Buyurtmani o'chirish</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Siz rostdan ham bu buyurtmani o'chirmoqchimisiz? Bu amalni qaytarib bo'lmaydi.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </CardFooter>
-                    </Card>
-                  ))}
+                      <Button size="sm" onClick={() => handleStatusChange(order.id!)}>
+                        <CheckCircle className="mr-1 h-4 w-4" />
+                        Yakunlash
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </TabsContent>
-          </Tabs>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Order Details Dialog */}
+      <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogTitle className="text-lg font-semibold">{selectedOrder ? "Buyurtma tafsilotlari" : ""}</DialogTitle>
+          {selectedOrder && <OrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} />}
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   )
 }

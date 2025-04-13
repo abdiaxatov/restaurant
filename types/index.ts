@@ -1,30 +1,46 @@
 export interface MenuItem {
   id: string
   name: string
+  description?: string
   price: number
-  categoryId: string
-  description: string
+  category: string
   imageUrl?: string
-  servesCount: number
-  isAvailable: boolean
-  remainingServings?: number // For tracking available portions
-  quantity?: number // For inventory tracking
-  createdAt?: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
+  servesCount?: number
+  remainingServings?: number
+  needsContainer?: boolean
+  containerPrice?: number
+}
+
+export interface CartItem {
+  id: string
+  name: string
+  price: number
+  quantity: number
+  imageUrl?: string
 }
 
 export interface Category {
   id: string
   name: string
-  createdAt?: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
+  description?: string
+  imageUrl?: string
 }
 
-export interface CartItem extends MenuItem {
-  quantity: number
+export interface Table {
+  id: string
+  number: number
+  seats: number
+  status: "available" | "occupied" | "reserved"
+  roomId?: string
 }
 
-// Update the Order type to include delivery costs
+export interface Room {
+  id: string
+  number: number
+  status: "available" | "occupied" | "reserved"
+  description?: string
+}
+
 export interface Order {
   id?: string
   orderType: "table" | "delivery"
@@ -37,48 +53,29 @@ export interface Order {
     name: string
     price: number
     quantity: number
+    needsContainer?: boolean
+    containerPrice?: number
   }[]
-  subtotal?: number // Added for delivery orders
-  deliveryFee?: number // Added for delivery orders
-  containerCost?: number // Added for delivery orders
+  subtotal?: number
+  deliveryFee?: number
+  containerCost?: number
   total: number
-  status: string
-  createdAt: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
+  status: "pending" | "preparing" | "ready" | "delivering" | "completed"
+  createdAt: any
+  updatedAt?: any
+  deletedAt?: any
+  deletedBy?: string
+  tableInfo?: {
+    status: string
+    seats: number
+    roomId?: string
+  }
 }
 
 export interface User {
   id: string
   name: string
   email: string
-  role: "admin" | "chef" | "oshpaz" | "waiter" | "ofitsiant"
-  createdAt: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
-}
-
-export interface Table {
-  id: string
-  number: number
-  seats: number
-  status: "available" | "occupied" | "reserved"
-  roomId?: string | null
-  tableTypeId?: string | null
-  createdAt: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
-}
-
-export interface Room {
-  id: string
-  name: string
-  capacity: number
-  createdAt: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
-}
-
-export interface TableType {
-  id: string
-  name: string
-  seats: number
-  createdAt: any // Firestore timestamp
-  updatedAt?: any // Firestore timestamp
+  role: "admin" | "chef" | "waiter"
+  createdAt: any
 }

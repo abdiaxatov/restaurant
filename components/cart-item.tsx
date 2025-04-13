@@ -1,94 +1,129 @@
 "use client"
 
-import Image from "next/image"
 import { useState } from "react"
+import Image from "next/image"
 import { useCart } from "@/components/cart-provider"
 import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
-import { Minus, Plus, Trash2, ImageOff } from "lucide-react"
+import { Minus, Plus, Trash2 } from "lucide-react"
+import type { CartItem as CartItemType } from "@/types"
 import { motion } from "framer-motion"
-import type { MenuItem } from "@/types"
 
 interface CartItemProps {
-  item: MenuItem & { quantity: number }
+  item: CartItemType
 }
 
 export function CartItem({ item }: CartItemProps) {
-  const { updateQuantity, removeFromCart } = useCart()
-  const [imageError, setImageError] = useState(false)
+  const { updateItemQuantity, removeItem } = useCart()
+  const [isRemoving, setIsRemoving] = useState(false)
 
   const handleIncrement = () => {
-    updateQuantity(item.id, item.quantity + 1)
+    // Play click sound
+    const audio = new Audio("/click.mp3")
+    audio.play().catch((e) => console.error("Error playing sound:", e))
+    updateItemQuantity(item.id, item.quantity + 1)
   }
 
   const handleDecrement = () => {
-    if (item.quantity > 1) {
-      updateQuantity(item.id, item.quantity - 1)
-    } else {
-      removeFromCart(item.id)
+    if (item.quantity <= 1) {
+      handleRemove()
+      return
     }
+    // Play click sound
+    const audio = new Audio("/click.mp3")
+    audio.play().catch((e) => console.error("Error playing sound:", e))
+    updateItemQuantity(item.id, item.quantity - 1)
+  }
+
+  const handleRemove = () => {
+    setIsRemoving(true)
+    // Play delete sound
+    const audio = new Audio("/notification.mp3")
+    audio.play().catch((e) => console.error("Error playing sound:", e))
+
+    // Small delay to allow animation to play
+    setTimeout(() => {
+      removeItem(item.id)
+    }, 300)
   }
 
   return (
     <motion.div
-      className="flex items-center gap-3 rounded-lg border bg-card p-3 shadow-sm transition-all hover:shadow-md"
-      whileHover={{ scale: 1.01 }}
-      initial={{ opacity: 0, y: 10 }}
+      className="mb-3"
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
+      exit={{ opacity: 0, y: -20, height: 0 }}
+      transition={{ duration: 0.3 }}
       layout
     >
-      <div className="relative h-20 w-20 overflow-hidden rounded-md flex-shrink-0">
-        {!imageError ? (
-          <Image
-            src={item.imageUrl || "/placeholder.svg?height=80&width=80"}
-            alt={item.name}
-            fill
-            className="object-cover"
-            onError={() => setImageError(true)}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-muted">
-            <ImageOff className="h-6 w-6 text-muted-foreground" />
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="font-medium line-clamp-1">{item.name}</h3>
-            <p className="text-sm text-muted-foreground">{formatCurrency(item.price)}</p>
-          </div>
-          <div className="text-right font-medium text-primary">{formatCurrency(item.price * item.quantity)}</div>
+      <motion.div
+        className={`flex items-center rounded-lg border bg-card p-3 shadow-sm ${isRemoving ? "opacity-50" : ""}`}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        animate={{ x: isRemoving ? 100 : 0, opacity: isRemoving ? 0 : 1 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      >
+        <div className="relative h-16 w-16 overflow-hidden rounded-md bg-muted">
+          {item.imageUrl ? (
+            <Image
+              src={item.imageUrl || "/placeholder.svg"}
+              alt={item.name}
+              fill
+              className="object-cover"
+              onError={(e) => {
+                e.currentTarget.src = "/placeholder.svg?height=64&width=64"
+              }}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground">No img</div>
+          )}
         </div>
 
-        <div className="mt-2 flex items-center justify-between">
-          <div className="flex items-center rounded-full border bg-background p-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={handleDecrement}>
-              {item.quantity === 1 ? (
-                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-              ) : (
-                <Minus className="h-3.5 w-3.5" />
-              )}
-            </Button>
-            <span className="w-8 text-center font-medium">{item.quantity}</span>
-            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={handleIncrement}>
-              <Plus className="h-3.5 w-3.5" />
+        <div className="ml-3 flex-1">
+          <div className="flex items-start justify-between">
+            <h3 className="font-medium">{item.name}</h3>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              onClick={handleRemove}
+              disabled={isRemoving}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="sr-only">Remove</span>
             </Button>
           </div>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-muted-foreground hover:text-destructive"
-            onClick={() => removeFromCart(item.id)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span className="ml-1 hidden sm:inline-block">O'chirish</span>
-          </Button>
+          <div className="mt-1 flex items-center justify-between">
+            <p className="text-sm font-medium">{formatCurrency(item.price)}</p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 rounded-full"
+                onClick={handleDecrement}
+                disabled={isRemoving}
+              >
+                <Minus className="h-3 w-3" />
+                <span className="sr-only">Decrease</span>
+              </Button>
+              <span className="w-6 text-center">{item.quantity}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 rounded-full"
+                onClick={handleIncrement}
+                disabled={isRemoving}
+              >
+                <Plus className="h-3 w-3" />
+                <span className="sr-only">Increase</span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-1 text-right text-sm font-semibold">{formatCurrency(item.price * item.quantity)}</div>
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   )
 }

@@ -1,44 +1,48 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useCart } from "@/components/cart-provider"
 import { Button } from "@/components/ui/button"
-import { formatCurrency } from "@/lib/utils"
 import { ShoppingCart } from "lucide-react"
-import { motion } from "framer-motion"
+import { useCart } from "@/components/cart-provider"
+import { motion, AnimatePresence } from "framer-motion"
 
 export function CartButton() {
   const { items, getTotalPrice, getTotalItems } = useCart()
   const router = useRouter()
   const totalItems = getTotalItems()
+  const [isAnimating, setIsAnimating] = useState(false)
+  const [prevTotalItems, setPrevTotalItems] = useState(totalItems)
+
+  useEffect(() => {
+    if (totalItems > prevTotalItems) {
+      setIsAnimating(true)
+      const timer = setTimeout(() => setIsAnimating(false), 500)
+      return () => clearTimeout(timer)
+    }
+    setPrevTotalItems(totalItems)
+  }, [totalItems, prevTotalItems])
 
   if (totalItems === 0) {
     return null
   }
 
   return (
-    <motion.div
-      className="fixed bottom-20 right-4 z-50 pb-6"
-      initial={{ scale: 0.8, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
-    >
-      <Button onClick={() => router.push("/cart")} className="flex items-center gap-2 rounded-full px-4 py-6 shadow-lg">
-        <div className="relative">
-          <ShoppingCart className="h-6 w-6" />
-          <motion.span
-            className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs font-bold text-primary"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 500, damping: 30, delay: 0.1 }}
-          >
-            {totalItems}
-          </motion.span>
-        </div>
-        <span className="font-semibold">{formatCurrency(getTotalPrice())}</span>
-      </Button>
-    </motion.div>
+    <AnimatePresence>
+      <motion.div
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0, opacity: 0 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+      >
+        <Button size="lg" className="rounded-full shadow-lg" onClick={() => router.push("/cart")}>
+          <motion.div animate={isAnimating ? { scale: [1, 1.2, 1] } : {}} transition={{ duration: 0.5 }}>
+            <ShoppingCart className="mr-2 h-5 w-5" />
+          </motion.div>
+          <span className="font-medium">{totalItems}</span>
+        </Button>
+      </motion.div>
+    </AnimatePresence>
   )
 }

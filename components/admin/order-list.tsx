@@ -1,20 +1,17 @@
 "use client"
-import { Card } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
-import { MapPin, Phone, Clock, ShoppingBag, User } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import type { Order } from "@/types"
+import { Button } from "@/components/ui/button"
 
 interface OrderListProps {
   orders: Order[]
   selectedOrderId?: string
   onSelectOrder: (order: Order) => void
+  onDeleteOrder?: (order: Order) => void
 }
 
-export const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListProps) => {
-  if (orders.length === 0) {
-    return <div className="py-8 text-center text-muted-foreground">Buyurtmalar topilmadi</div>
-  }
-
+export function OrderList({ orders, selectedOrderId, onSelectOrder, onDeleteOrder }: OrderListProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "pending":
@@ -59,86 +56,78 @@ export const OrderList = ({ orders, selectedOrderId, onSelectOrder }: OrderListP
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {orders.map((order) => (
-        <Card
-          key={order.id}
-          className={`cursor-pointer overflow-hidden transition-all hover:shadow-md ${
-            selectedOrderId === order.id ? "ring-2 ring-primary" : ""
-          }`}
-          onClick={() => onSelectOrder(order)}
-        >
-          {/* Status header */}
-          <div className={`${getStatusColor(order.status)} px-4 py-2`}>
-            <div className="flex items-center justify-between">
-              <span className="font-medium">{getStatusText(order.status)}</span>
-              <span className="text-sm">{formatDate(order.createdAt)}</span>
+    <div className="rounded-md border">
+      <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-4 border-b bg-muted p-4 font-medium">
+        <div>Buyurtma</div>
+        <div>Status</div>
+        <div>Summa</div>
+        <div>Amallar</div>
+      </div>
+      <div className="divide-y">
+        {orders.map((order) => (
+          <div
+            key={order.id}
+            className={`grid grid-cols-[1fr_1fr_1fr_auto] gap-4 p-4 hover:bg-muted/50 ${
+              selectedOrderId === order.id ? "bg-muted" : ""
+            }`}
+          >
+            <div>
+              <div className="font-medium">
+                {order.orderType === "table"
+                  ? order.roomNumber
+                    ? `Xona #${order.roomNumber}`
+                    : `Stol #${order.tableNumber}`
+                  : "Yetkazib berish"}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {order.createdAt?.toDate
+                  ? new Date(order.createdAt.toDate()).toLocaleString("uz-UZ", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })
+                  : ""}
+              </div>
+            </div>
+            <div>
+              <div
+                className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                  order.status === "pending"
+                    ? "bg-yellow-100 text-yellow-800"
+                    : order.status === "preparing"
+                      ? "bg-blue-100 text-blue-800"
+                      : order.status === "ready"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-gray-100 text-gray-800"
+                }`}
+              >
+                {order.status === "pending"
+                  ? "Kutilmoqda"
+                  : order.status === "preparing"
+                    ? "Tayyorlanmoqda"
+                    : order.status === "ready"
+                      ? "Tayyor"
+                      : "Yakunlangan"}
+              </div>
+            </div>
+            <div className="font-medium">{formatCurrency(order.total)}</div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => onSelectOrder(order)}>
+                Batafsil
+              </Button>
+              {onDeleteOrder && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 text-destructive"
+                  onClick={() => onDeleteOrder(order)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
-
-          {/* Order content */}
-          <div className="p-4">
-            {/* Order type and number */}
-            <div className="mb-3 flex items-center">
-              {order.orderType === "delivery" ? (
-                <div className="flex items-center text-lg font-semibold">
-                  <MapPin className="mr-2 h-5 w-5 text-primary" />
-                  Yetkazib berish
-                </div>
-              ) : order.roomNumber ? (
-                <div className="flex items-center text-lg font-semibold">
-                  <User className="mr-2 h-5 w-5 text-primary" />
-                  Xona #{order.roomNumber}
-                </div>
-              ) : (
-                <div className="flex items-center text-lg font-semibold">
-                  <User className="mr-2 h-5 w-5 text-primary" />
-                  Stol #{order.tableNumber}
-                </div>
-              )}
-            </div>
-
-            {/* Order details */}
-            <div className="space-y-2">
-              {/* Items count */}
-              <div className="flex items-center text-sm text-muted-foreground">
-                <ShoppingBag className="mr-2 h-4 w-4" />
-                {order.items.length} ta taom
-              </div>
-
-              {/* Phone number if available */}
-              {order.phoneNumber && (
-                <div className="flex items-center text-sm text-muted-foreground">
-                  <Phone className="mr-2 h-4 w-4" />
-                  {order.phoneNumber}
-                </div>
-              )}
-
-              {/* Address for delivery orders */}
-              {order.orderType === "delivery" && order.address && (
-                <div className="flex items-start text-sm text-muted-foreground">
-                  <MapPin className="mr-2 h-4 w-4 shrink-0 mt-0.5" />
-                  <span className="line-clamp-2">{order.address}</span>
-                </div>
-              )}
-
-              {/* Order time */}
-              <div className="flex items-center text-sm text-muted-foreground">
-                <Clock className="mr-2 h-4 w-4" />
-                {formatDate(order.createdAt)}
-              </div>
-            </div>
-
-            {/* Total price */}
-            <div className="mt-3 border-t pt-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Jami:</span>
-                <span className="text-lg font-bold text-primary">{formatCurrency(order.total)}</span>
-              </div>
-            </div>
-          </div>
-        </Card>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }

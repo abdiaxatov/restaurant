@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app"
 import { getFirestore } from "firebase/firestore"
 import { getAuth } from "firebase/auth"
+import { getStorage } from "firebase/storage"
 
 const firebaseConfig = {
   apiKey: "AIzaSyBzr0W1tqLQgQ-0Kv6MMo9Bi_Rma4dkkqY",
@@ -16,6 +17,7 @@ const firebaseConfig = {
 let app
 let db
 let auth
+let storage
 
 // We need to make sure Firebase is only initialized on the client side
 if (typeof window !== "undefined") {
@@ -26,6 +28,7 @@ if (typeof window !== "undefined") {
   }
   db = getFirestore(app)
   auth = getAuth(app)
+  storage = getStorage(app)
 }
 
-export { app, db, auth }
+export { app, db, auth, storage }

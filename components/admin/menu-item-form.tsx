@@ -2,186 +2,297 @@
 
 import type React from "react"
 
-import { useState } from "react"
-import { collection, doc, addDoc, updateDoc } from "firebase/firestore"
-import { db } from "@/lib/firebase"
-import { Button } from "@/components/ui/button"
+import { useState, useEffect } from "react"
+import { collection, addDoc, doc, updateDoc, getDocs, query, where } from "firebase/firestore"
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
+import { db, storage } from "@/lib/firebase"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
-import { X } from "lucide-react"
-import type { MenuItem, Category } from "@/types"
+import { Loader2, Save, X } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
 
-interface MenuItemFormProps {
-  item?: MenuItem | null
-  categories: Category[]
-  onClose: () => void
+interface MenuItem {
+  id?: string
+  name: string
+  description: string
+  price: number
+  category: string
+  image: string
+  available: boolean
+  needsContainer: boolean
 }
 
-export function MenuItemForm({ item, categories, onClose }: MenuItemFormProps) {
-  const [formData, setFormData] = useState({
-    name: item?.name || "",
-    price: item?.price ? item.price.toString() : "",
-    categoryId: item?.categoryId || "",
-    description: item?.description || "",
-    imageUrl: item?.imageUrl || "",
-    servesCount: item?.servesCount ? item.servesCount.toString() : "1",
-    isAvailable: item?.isAvailable !== false, // Default to true if not specified
-  })
-  const [isSubmitting, setIsSubmitting] = useState(false)
+interface MenuItemFormProps {
+  item?: MenuItem
+  onSuccess: () => void
+  onCancel: () => void
+}
+
+export function MenuItemForm({ item, onSuccess, onCancel }: MenuItemFormProps) {
+  const [name, setName] = useState(item?.name || "")
+  const [description, setDescription] = useState(item?.description || "")
+  const [price, setPrice] = useState(item?.price?.toString() || "")
+  const [category, setCategory] = useState(item?.category || "")
+  const [image, setImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState(item?.image || "")
+  const [available, setAvailable] = useState(item?.available !== false)
+  const [needsContainer, setNeedsContainer] = useState(item?.needsContainer || false)
+  const [categories, setCategories] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [newCategory, setNewCategory] = useState("")
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false)
   const { toast } = useToast()
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const categoriesSnapshot = await getDocs(collection(db, "categories"))
+        const categoriesList = categoriesSnapshot.docs.map((doc) => doc.data().name)
+        setCategories(categoriesList)
+      } catch (error) {
+        console.error("Error fetching categories:", error)
+        toast({
+          title: "Xatolik",
+          description: "Kategoriyalarni yuklashda xatolik yuz berdi",
+          variant: "destructive",
+        })
+      }
+    }
+
+    fetchCategories()
+  }, [toast])
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      setImage(file)
+      setImagePreview(URL.createObjectURL(file))
+    }
   }
 
-  const handleSelectChange = (name: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [name]: value }))
-  }
+  const handleAddCategory = async () => {
+    if (!newCategory.trim()) return
 
-  const handleSwitchChange = (name: string, checked: boolean) => {
-    setFormData((prev) => ({ ...prev, [name]: checked }))
+    try {
+      // Check if category already exists
+      const categoryQuery = query(collection(db, "categories"), where("name", "==", newCategory))
+      const categorySnapshot = await getDocs(categoryQuery)
+
+      if (categorySnapshot.empty) {
+        await addDoc(collection(db, "categories"), {
+          name: newCategory,
+          createdAt: new Date(),
+        })
+
+        setCategories([...categories, newCategory])
+        setCategory(newCategory)
+        setNewCategory("")
+        setShowNewCategoryInput(false)
+
+        toast({
+          title: "Kategoriya qo'shildi",
+          description: `"${newCategory}" kategoriyasi muvaffaqiyatli qo'shildi`,
+        })
+      } else {
+        toast({
+          title: "Kategoriya mavjud",
+          description: `"${newCategory}" kategoriyasi allaqachon mavjud`,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error adding category:", error)
+      toast({
+        title: "Xatolik",
+        description: "Kategoriyani qo'shishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!formData.name || !formData.price || !formData.categoryId) {
-      toast({
-        title: "To'ldirilmagan maydonlar",
-        description: "Iltimos, barcha majburiy maydonlarni to'ldiring",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmitting(true)
+    setIsLoading(true)
 
     try {
+      let imageUrl = item?.image || ""
+
+      // Upload image if a new one is selected
+      if (image) {
+        const storageRef = ref(storage, `menu-items/${Date.now()}_${image.name}`)
+        await uploadBytes(storageRef, image)
+        imageUrl = await getDownloadURL(storageRef)
+      }
+
       const menuItemData = {
-        name: formData.name,
-        price: Number(formData.price),
-        categoryId: formData.categoryId,
-        description: formData.description,
-        imageUrl: formData.imageUrl || null,
-        servesCount: Number(formData.servesCount) || 1,
-        isAvailable: formData.isAvailable,
+        name,
+        description,
+        price: Number(price),
+        category,
+        image: imageUrl,
+        available,
+        needsContainer,
+        updatedAt: new Date(),
       }
 
       if (item?.id) {
         // Update existing item
-        await updateDoc(doc(db, "menuItems", item.id), menuItemData)
+        await updateDoc(doc(db, "menu-items", item.id), menuItemData)
         toast({
           title: "Taom yangilandi",
-          description: `${formData.name} muvaffaqiyatli yangilandi`,
+          description: `"${name}" muvaffaqiyatli yangilandi`,
         })
       } else {
         // Add new item
-        await addDoc(collection(db, "menuItems"), menuItemData)
+        await addDoc(collection(db, "menu-items"), {
+          ...menuItemData,
+          createdAt: new Date(),
+        })
         toast({
           title: "Taom qo'shildi",
-          description: `${formData.name} menyuga qo'shildi`,
+          description: `"${name}" muvaffaqiyatli qo'shildi`,
         })
       }
 
-      onClose()
+      onSuccess()
     } catch (error) {
       console.error("Error saving menu item:", error)
       toast({
         title: "Xatolik",
-        description: "Taomni saqlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring.",
+        description: "Taomni saqlashda xatolik yuz berdi",
         variant: "destructive",
       })
-      setIsSubmitting(false)
+    } finally {
+      setIsLoading(false)
     }
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-bold">{item ? "Taomni tahrirlash" : "Yangi taom qo'shish"}</h2>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="name">Taom nomi</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Taom nomini kiriting"
+          required
+        />
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">Nomi *</Label>
-          <Input id="name" name="name" value={formData.name} onChange={handleChange} required />
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="description">Taom haqida</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Taom haqida ma'lumot kiriting"
+          rows={3}
+        />
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="price">Narxi (so'm) *</Label>
-          <Input id="price" name="price" type="number" value={formData.price} onChange={handleChange} required />
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="price">Narxi (so'm)</Label>
+        <Input
+          id="price"
+          type="number"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="Taom narxini kiriting"
+          required
+        />
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="categoryId">Kategoriya *</Label>
-          <Select value={formData.categoryId} onValueChange={(value) => handleSelectChange("categoryId", value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Kategoriyani tanlang" />
-            </SelectTrigger>
-            <SelectContent>
-              {categories.map((category) => (
-                <SelectItem key={category.id} value={category.id}>
-                  {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="category">Kategoriya</Label>
+        {showNewCategoryInput ? (
+          <div className="flex gap-2">
+            <Input
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="Yangi kategoriya nomi"
+            />
+            <Button type="button" onClick={handleAddCategory} variant="outline">
+              Qo'shish
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setShowNewCategoryInput(false)}
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Select value={category} onValueChange={setCategory} required>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Kategoriyani tanlang" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              onClick={() => setShowNewCategoryInput(true)}
+              variant="outline"
+              className="whitespace-nowrap"
+            >
+              Yangi kategoriya
+            </Button>
+          </div>
+        )}
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="servesCount">Porsiya (necha kishi uchun)</Label>
-          <Input
-            id="servesCount"
-            name="servesCount"
-            type="number"
-            min="1"
-            value={formData.servesCount}
-            onChange={handleChange}
-          />
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="image">Taom rasmi</Label>
+        <Input id="image" type="file" accept="image/*" onChange={handleImageChange} className="cursor-pointer" />
+        {imagePreview && (
+          <div className="mt-2">
+            <img src={imagePreview || "/placeholder.svg"} alt="Preview" className="h-40 w-40 rounded-md object-cover" />
+          </div>
+        )}
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="description">Tavsif</Label>
-          <Textarea id="description" name="description" value={formData.description} onChange={handleChange} rows={3} />
-        </div>
+      <div className="flex items-center space-x-2">
+        <Switch id="available" checked={available} onCheckedChange={setAvailable} />
+        <Label htmlFor="available">Mavjud</Label>
+      </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="imageUrl">Rasm URL manzili</Label>
-          <Input
-            id="imageUrl"
-            name="imageUrl"
-            value={formData.imageUrl}
-            onChange={handleChange}
-            placeholder="https://example.com/image.jpg"
-          />
-        </div>
+      <div className="flex items-center space-x-2">
+        <Switch id="needsContainer" checked={needsContainer} onCheckedChange={setNeedsContainer} />
+        <Label htmlFor="needsContainer">Bir martalik idish kerak</Label>
+      </div>
 
-        <div className="flex items-center space-x-2">
-          <Switch
-            id="isAvailable"
-            checked={formData.isAvailable}
-            onCheckedChange={(checked) => handleSwitchChange("isAvailable", checked)}
-          />
-          <Label htmlFor="isAvailable">Mavjud (mijozlar ko'rishi mumkin)</Label>
-        </div>
-
-        <div className="flex justify-end space-x-2 pt-4">
-          <Button type="button" variant="outline" onClick={onClose}>
-            Bekor qilish
-          </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Saqlanmoqda..." : item ? "Yangilash" : "Qo'shish"}
-          </Button>
-        </div>
-      </form>
-    </div>
+      <div className="flex justify-end space-x-2">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Bekor qilish
+        </Button>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saqlanmoqda...
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              Saqlash
+            </>
+          )}
+        </Button>
+      </div>
+    </form>
   )
 }

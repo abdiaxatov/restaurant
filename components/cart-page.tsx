@@ -44,6 +44,9 @@ export function CartPage() {
   const [hasAvailableRooms, setHasAvailableRooms] = useState(true)
   const [isDeliveryAvailable, setIsDeliveryAvailable] = useState(true)
   const [isLoading, setIsLoading] = useState(true)
+  const [deliveryFee, setDeliveryFee] = useState(15000)
+  const [containerCost, setContainerCost] = useState(0)
+  const [menuItems, setMenuItems] = useState<Record<string, MenuItem>>({})
   const router = useRouter()
   const { toast } = useToast()
   // Add state for tracking validation errors
@@ -53,10 +56,6 @@ export function CartPage() {
     address?: boolean
   }>({})
 
-  // Add delivery fee and container cost state variables after the address state
-  const [deliveryFee, setDeliveryFee] = useState(15000) // Default delivery fee: 15,000 UZS
-  const [containerCost, setContainerCost] = useState(0) // Container cost will be calculated based on items
-
   // Check if there are available tables, rooms and if delivery is available
   useEffect(() => {
     setIsLoading(true)
@@ -65,6 +64,7 @@ export function CartPage() {
     let tablesUnsubscribe = () => {}
     let roomsUnsubscribe = () => {}
     let settingsUnsubscribe = () => {}
+    let menuItemsUnsubscribe = () => {}
 
     try {
       // Check for available tables
@@ -80,8 +80,8 @@ export function CartPage() {
               (roomsSnapshot) => {
                 setHasAvailableRooms(!roomsSnapshot.empty)
 
-                // If no tables and no rooms are available, default to delivery
-                if (roomsSnapshot.empty) {
+                // If no tables and no rooms are available, default to delivery if it's available
+                if (roomsSnapshot.empty && isDeliveryAvailable) {
                   setOrderType("delivery")
                 }
 
@@ -90,7 +90,9 @@ export function CartPage() {
               (error) => {
                 console.error("Error checking available rooms:", error)
                 setHasAvailableRooms(false)
-                setOrderType("delivery")
+                if (isDeliveryAvailable) {
+                  setOrderType("delivery")
+                }
                 setIsLoading(false)
               },
             )
@@ -101,18 +103,39 @@ export function CartPage() {
         (error) => {
           console.error("Error checking available tables:", error)
           setHasAvailableTables(false)
-          setOrderType("delivery")
+          if (isDeliveryAvailable) {
+            setOrderType("delivery")
+          }
           setIsLoading(false)
         },
       )
 
-      // Check if delivery is available from settings
+      // Check if delivery is available from settings and get delivery fee
       settingsUnsubscribe = onSnapshot(
         doc(db, "settings", "orderSettings"),
         (doc) => {
           if (doc.exists()) {
             const data = doc.data()
             setIsDeliveryAvailable(data.deliveryAvailable !== false)
+            setDeliveryFee(data.deliveryFee || 15000)
+
+            // If delivery is not available and there are no tables/rooms, show warning
+            if (data.deliveryAvailable === false && !hasAvailableTables && !hasAvailableRooms) {
+              toast({
+                title: "Buyurtma berish imkoni yo'q",
+                description: "Hozirda na stollar, na yetkazib berish xizmati mavjud emas.",
+                variant: "destructive",
+              })
+            }
+
+            // If delivery is not available and current order type is delivery, switch to table
+            if (
+              data.deliveryAvailable === false &&
+              orderType === "delivery" &&
+              (hasAvailableTables || hasAvailableRooms)
+            ) {
+              setOrderType("table")
+            }
           }
           setIsLoading(false)
         },
@@ -120,6 +143,21 @@ export function CartPage() {
           console.error("Error checking delivery availability:", error)
           setIsDeliveryAvailable(true)
           setIsLoading(false)
+        },
+      )
+
+      // Get all menu items to access their container prices
+      menuItemsUnsubscribe = onSnapshot(
+        collection(db, "menuItems"),
+        (snapshot) => {
+          const menuItemsData: Record<string, MenuItem> = {}
+          snapshot.forEach((doc) => {
+            menuItemsData[doc.id] = { id: doc.id, ...doc.data() } as MenuItem
+          })
+          setMenuItems(menuItemsData)
+        },
+        (error) => {
+          console.error("Error fetching menu items:", error)
         },
       )
     } catch (error) {
@@ -139,24 +177,32 @@ export function CartPage() {
         if (typeof settingsUnsubscribe === "function") {
           settingsUnsubscribe()
         }
+        if (typeof menuItemsUnsubscribe === "function") {
+          menuItemsUnsubscribe()
+        }
       } catch (error) {
         console.error("Error unsubscribing:", error)
       }
     }
-  }, [])
+  }, [toast, orderType, hasAvailableTables, hasAvailableRooms, isDeliveryAvailable])
 
-  // Add a useEffect to calculate container costs based on items
+  // Calculate container costs based on items
   useEffect(() => {
     if (orderType === "delivery") {
-      // Calculate container cost based on number of items (e.g., 2,000 UZS per item)
-      const calculatedContainerCost = items.reduce((total, item) => {
-        return total + item.quantity * 2000 // 2,000 UZS per item for containers
-      }, 0)
+      // Calculate container cost based on items that need containers
+      let calculatedContainerCost = 0
+      for (const item of items) {
+        // Get the latest menu item data from Firestore
+        const menuItem = menuItems[item.id]
+        if (menuItem && menuItem.needsContainer) {
+          calculatedContainerCost += item.quantity * (menuItem.containerPrice || 2000)
+        }
+      }
       setContainerCost(calculatedContainerCost)
     } else {
       setContainerCost(0)
     }
-  }, [items, orderType])
+  }, [items, orderType, menuItems])
 
   // Handle table or room selection
   const handleSelectTableOrRoom = (table: number | null, room: number | null) => {
@@ -299,9 +345,22 @@ export function CartPage() {
         }
       }
 
-      // Prepare order data
+      // Prepare order data with updated container information
       const subtotal = getTotalPrice()
       const totalWithDelivery = orderType === "delivery" ? subtotal + deliveryFee + containerCost : subtotal
+
+      // Map items with their current container information from the database
+      const orderItems = items.map((item) => {
+        const menuItem = menuItems[item.id]
+        return {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          needsContainer: menuItem?.needsContainer || false,
+          containerPrice: menuItem?.containerPrice || 0,
+        }
+      })
 
       const orderData = {
         orderType,
@@ -309,12 +368,7 @@ export function CartPage() {
         roomNumber: orderType === "table" && roomNumber ? roomNumber : null,
         phoneNumber: phoneNumber || null,
         address: orderType === "delivery" ? address : null,
-        items: items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity,
-        })),
+        items: orderItems,
         subtotal: subtotal,
         deliveryFee: orderType === "delivery" ? deliveryFee : 0,
         containerCost: orderType === "delivery" ? containerCost : 0,
@@ -455,6 +509,9 @@ export function CartPage() {
     }
   }
 
+  // Check if any ordering option is available
+  const isOrderingAvailable = hasAvailableTables || hasAvailableRooms || isDeliveryAvailable
+
   return (
     <div className="container mx-auto max-w-4xl p-4">
       <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.3 }}>
@@ -472,6 +529,16 @@ export function CartPage() {
       >
         Sizning savatingiz
       </motion.h1>
+
+      {!isOrderingAvailable && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Buyurtma berish imkoni yo'q</AlertTitle>
+          <AlertDescription>
+            Hozirda na stollar, na yetkazib berish xizmati mavjud emas. Iltimos, keyinroq qayta urinib ko'ring.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {items.length === 0 ? (
         <motion.div
@@ -494,7 +561,12 @@ export function CartPage() {
                   variant="ghost"
                   size="sm"
                   className="text-muted-foreground hover:text-destructive"
-                  onClick={clearCart}
+                  onClick={() => {
+                    // Play delete sound
+                    const audio = new Audio("/click.mp3")
+                    audio.play().catch((e) => console.error("Error playing sound:", e))
+                    clearCart()
+                  }}
                 >
                   <Trash2 className="mr-1 h-4 w-4" />
                   Tozalash
@@ -536,16 +608,10 @@ export function CartPage() {
                       onValueChange={(value) => setOrderType(value as "table" | "delivery")}
                     >
                       <TabsList className="mb-4 grid w-full grid-cols-2">
-                        <TabsTrigger
-                          value="table"
-                          disabled={!hasAvailableTables && !hasAvailableRooms && !isDeliveryAvailable}
-                        >
+                        <TabsTrigger value="table" disabled={!hasAvailableTables && !hasAvailableRooms}>
                           Stol/Xona buyurtmasi
                         </TabsTrigger>
-                        <TabsTrigger
-                          value="delivery"
-                          disabled={!isDeliveryAvailable && !hasAvailableTables && !hasAvailableRooms}
-                        >
+                        <TabsTrigger value="delivery" disabled={!isDeliveryAvailable}>
                           Yetkazib berish
                         </TabsTrigger>
                       </TabsList>
@@ -673,10 +739,12 @@ export function CartPage() {
                           <span>Taomlar narxi:</span>
                           <span>{formatCurrency(getTotalPrice())}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Idishlar narxi:</span>
-                          <span>{formatCurrency(containerCost)}</span>
-                        </div>
+                        {containerCost > 0 && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span>Idishlar narxi:</span>
+                            <span>{formatCurrency(containerCost)}</span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between text-sm">
                           <span>Yetkazib berish narxi:</span>
                           <span>{formatCurrency(deliveryFee)}</span>
@@ -701,7 +769,8 @@ export function CartPage() {
                       isSubmitting ||
                       items.length === 0 ||
                       (orderType === "table" && !hasAvailableTables && !hasAvailableRooms) ||
-                      (orderType === "delivery" && !isDeliveryAvailable)
+                      (orderType === "delivery" && !isDeliveryAvailable) ||
+                      !isOrderingAvailable
                     }
                     onClick={handlePlaceOrder}
                   >

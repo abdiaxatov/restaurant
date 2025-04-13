@@ -33,6 +33,8 @@ export function MenuItemForm({ item, categories, open, onClose }: MenuItemFormPr
     imageUrl: item?.imageUrl || "",
     servesCount: item?.servesCount ? item.servesCount.toString() : "1",
     isAvailable: item?.isAvailable !== false, // Default to true if not specified
+    needsContainer: item?.needsContainer || false,
+    containerPrice: item?.containerPrice ? item.containerPrice.toString() : "2000",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isImageValid, setIsImageValid] = useState(false)
@@ -99,6 +101,8 @@ export function MenuItemForm({ item, categories, open, onClose }: MenuItemFormPr
         servesCount: Number(formData.servesCount) || 1,
         isAvailable: formData.isAvailable,
         remainingServings: Number(formData.servesCount) || 1, // Add remaining servings field
+        needsContainer: formData.needsContainer,
+        containerPrice: formData.needsContainer ? Number(formData.containerPrice) : 0,
       }
 
       if (item?.id) {
@@ -179,6 +183,30 @@ export function MenuItemForm({ item, categories, open, onClose }: MenuItemFormPr
                   value={formData.servesCount}
                   onChange={handleChange}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="needsContainer"
+                    checked={formData.needsContainer}
+                    onCheckedChange={(checked) => handleSwitchChange("needsContainer", checked)}
+                  />
+                  <Label htmlFor="needsContainer">Bir martalik idish kerak</Label>
+                </div>
+
+                {formData.needsContainer && (
+                  <div className="mt-2">
+                    <Label htmlFor="containerPrice">Idish narxi (so'm)</Label>
+                    <Input
+                      id="containerPrice"
+                      name="containerPrice"
+                      type="number"
+                      value={formData.containerPrice}
+                      onChange={handleChange}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

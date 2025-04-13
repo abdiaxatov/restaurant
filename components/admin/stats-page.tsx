@@ -1,14 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { collection, query, where, getDocs } from "firebase/firestore"
+import { collection, query, where, getDocs, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
-import { BarChart, DollarSign, ShoppingBag, Utensils, PieChart } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { BarChart, DollarSign, ShoppingBag, Utensils, PieChart, Download } from "lucide-react"
 import {
   BarChart as RechartsBarChart,
   Bar,
@@ -21,7 +22,10 @@ import {
   Pie,
   Cell,
   Legend,
+  LineChart,
+  Line,
 } from "recharts"
+import * as XLSX from "xlsx"
 
 interface TopItem {
   name: string
@@ -40,12 +44,19 @@ interface OrdersByStatus {
   color: string
 }
 
+interface OrdersByType {
+  name: string
+  value: number
+  color: string
+}
+
 export function StatsPage() {
   const [todayOrders, setTodayOrders] = useState(0)
   const [todayRevenue, setTodayRevenue] = useState(0)
   const [topItems, setTopItems] = useState<TopItem[]>([])
   const [weeklyRevenue, setWeeklyRevenue] = useState<DailyRevenue[]>([])
   const [ordersByStatus, setOrdersByStatus] = useState<OrdersByStatus[]>([])
+  const [ordersByType, setOrdersByType] = useState<OrdersByType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [timeRange, setTimeRange] = useState<"today" | "week" | "month">("today")
   const { toast } = useToast()
@@ -74,6 +85,7 @@ export function StatsPage() {
           collection(db, "orders"),
           where("createdAt", ">=", startDate),
           where("createdAt", "<", tomorrow),
+          orderBy("createdAt", "asc"),
         )
 
         const ordersSnapshot = await getDocs(ordersQuery)
@@ -86,6 +98,10 @@ export function StatsPage() {
           preparing: 0,
           ready: 0,
           completed: 0,
+        }
+        const typeCounts: Record<string, number> = {
+          table: 0,
+          delivery: 0,
         }
 
         ordersSnapshot.forEach((doc) => {
@@ -106,6 +122,11 @@ export function StatsPage() {
           if (statusCounts[order.status] !== undefined) {
             statusCounts[order.status]++
           }
+
+          // Count orders by type
+          if (typeCounts[order.orderType] !== undefined) {
+            typeCounts[order.orderType]++
+          }
         })
 
         // Convert to array and sort by count
@@ -122,12 +143,19 @@ export function StatsPage() {
           { name: "Yakunlangan", value: statusCounts.completed, color: "#8884d8" },
         ].filter((item) => item.value > 0)
 
+        // Create orders by type data for pie chart
+        const ordersByTypeArray = [
+          { name: "Stol buyurtmasi", value: typeCounts.table, color: "#0088FE" },
+          { name: "Yetkazib berish", value: typeCounts.delivery, color: "#00C49F" },
+        ].filter((item) => item.value > 0)
+
         setTodayOrders(orderCount)
         setTodayRevenue(revenue)
         setTopItems(topItemsArray)
         setOrdersByStatus(ordersByStatusArray)
+        setOrdersByType(ordersByTypeArray)
 
-        // Get weekly revenue data
+        // Get weekly/monthly revenue data
         if (timeRange === "week" || timeRange === "month") {
           const daysToFetch = timeRange === "week" ? 7 : 30
           const weeklyData: DailyRevenue[] = []
@@ -182,19 +210,92 @@ export function StatsPage() {
     return formatCurrency(value)
   }
 
+  const exportToExcel = () => {
+    try {
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new()
+
+      // Create main stats sheet
+      const mainStats = [
+        ["Statistika", timeRange === "today" ? "Bugun" : timeRange === "week" ? "Hafta" : "Oy"],
+        ["Buyurtmalar soni", todayOrders],
+        ["Jami tushum", todayRevenue],
+        ["O'rtacha buyurtma qiymati", todayOrders > 0 ? todayRevenue / todayOrders : 0],
+        [],
+        ["Buyurtmalar holati"],
+        ["Holat", "Soni"],
+        ...ordersByStatus.map((item) => [item.name, item.value]),
+        [],
+        ["Buyurtma turlari"],
+        ["Tur", "Soni"],
+        ...ordersByType.map((item) => [item.name, item.value]),
+        [],
+        ["Eng mashhur taomlar"],
+        ["Taom nomi", "Soni"],
+        ...topItems.map((item) => [item.name, item.count]),
+      ]
+
+      // Add revenue data if available
+      if (weeklyRevenue.length > 0) {
+        mainStats.push([])
+        mainStats.push([timeRange === "week" ? "Haftalik tushum" : "Oylik tushum"])
+        mainStats.push(["Sana", "Tushum"])
+        weeklyRevenue.forEach((item) => {
+          mainStats.push([item.date, item.revenue])
+        })
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(mainStats)
+      XLSX.utils.book_append_sheet(wb, ws, "Statistika")
+
+      // Generate filename based on date range
+      const dateStr = new Date()
+        .toLocaleDateString("uz-UZ", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+        .replace(/\//g, "-")
+
+      const filename = `Statistika_${timeRange === "today" ? "Kun" : timeRange === "week" ? "Hafta" : "Oy"}_${dateStr}.xlsx`
+
+      // Save file
+      XLSX.writeFile(wb, filename)
+
+      toast({
+        title: "Muvaffaqiyatli",
+        description: "Statistika ma'lumotlari Excel formatida yuklab olindi",
+      })
+    } catch (error) {
+      console.error("Error exporting to Excel:", error)
+      toast({
+        title: "Xatolik",
+        description: "Excel faylini yaratishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
+  }
+
   return (
     <AdminLayout>
       <div className="p-6">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Statistika</h1>
 
-          <Tabs defaultValue={timeRange} onValueChange={(value) => setTimeRange(value as "today" | "week" | "month")}>
-            <TabsList>
-              <TabsTrigger value="today">Bugun</TabsTrigger>
-              <TabsTrigger value="week">Hafta</TabsTrigger>
-              <TabsTrigger value="month">Oy</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-4">
+            <Tabs defaultValue={timeRange} onValueChange={(value) => setTimeRange(value as "today" | "week" | "month")}>
+              <TabsList>
+                <TabsTrigger value="today">Bugun</TabsTrigger>
+                <TabsTrigger value="week">Hafta</TabsTrigger>
+                <TabsTrigger value="month">Oy</TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            <Button variant="outline" onClick={exportToExcel}>
+              <Download className="mr-2 h-4 w-4" />
+              Excel
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -274,6 +375,41 @@ export function StatsPage() {
                 <CardContent>
                   <div className="text-2xl font-bold">
                     {todayOrders > 0 ? formatCurrency(todayRevenue / todayOrders) : formatCurrency(0)}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Buyurtma turlari</CardTitle>
+                  <PieChart className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[100px]">
+                    {ordersByType.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RechartsPieChart>
+                          <Pie
+                            data={ordersByType}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={25}
+                            outerRadius={40}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {ordersByType.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(value) => [value, "Buyurtmalar soni"]} />
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-sm text-muted-foreground">Ma'lumot yo'q</p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -372,6 +508,30 @@ export function StatsPage() {
                           <Tooltip formatter={(value) => [formatCurrency(value as number), "Tushum"]} />
                           <Bar dataKey="revenue" fill="#8884d8" name="Tushum" />
                         </RechartsBarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {(timeRange === "week" || timeRange === "month") && weeklyRevenue.length > 0 && (
+                <Card className="col-span-2">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart className="h-5 w-5" />
+                      {timeRange === "week" ? "Haftalik tushum (chiziq)" : "Oylik tushum (chiziq)"}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={weeklyRevenue}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis tickFormatter={(value) => formatCurrency(value).replace(/\s+/g, "")} />
+                          <Tooltip formatter={(value) => [formatCurrency(value as number), "Tushum"]} />
+                          <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Tushum" strokeWidth={2} />
+                        </LineChart>
                       </ResponsiveContainer>
                     </div>
                   </CardContent>

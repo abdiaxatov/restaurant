@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { doc, onSnapshot } from "firebase/firestore"
+import { doc, onSnapshot, collection, query, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -31,7 +31,8 @@ export function OrderHistory() {
 
         // Set up real-time listeners for each order
         const unsubscribes = orderIds.map((id: string) => {
-          return onSnapshot(
+          // First check active orders
+          const activeOrderUnsubscribe = onSnapshot(
             doc(db, "orders", id),
             (doc) => {
               if (doc.exists()) {
@@ -50,6 +51,36 @@ export function OrderHistory() {
                   }
                 })
                 setIsLoading(false)
+              } else {
+                // If not found in active orders, check orderHistory
+                const historyOrderUnsubscribe = onSnapshot(
+                  query(collection(db, "orderHistory"), where("id", "==", id)),
+                  (snapshot) => {
+                    if (!snapshot.empty) {
+                      const historyDoc = snapshot.docs[0]
+                      setOrders((prevOrders) => {
+                        const newOrder = { id: historyDoc.id, ...historyDoc.data() } as Order
+                        const existingOrderIndex = prevOrders.findIndex((o) => o.id === id)
+
+                        if (existingOrderIndex >= 0) {
+                          // Update existing order
+                          const updatedOrders = [...prevOrders]
+                          updatedOrders[existingOrderIndex] = newOrder
+                          return updatedOrders
+                        } else {
+                          // Add new order
+                          return [...prevOrders, newOrder]
+                        }
+                      })
+                    }
+                    setIsLoading(false)
+                  },
+                  (error) => {
+                    console.error("Error fetching history order:", error)
+                    setIsLoading(false)
+                  },
+                )
+                return historyOrderUnsubscribe
               }
             },
             (error) => {
@@ -57,6 +88,8 @@ export function OrderHistory() {
               setIsLoading(false)
             },
           )
+
+          return activeOrderUnsubscribe
         })
 
         return () => {
@@ -156,7 +189,7 @@ export function OrderHistory() {
 
   return (
     <div className="space-y-4">
-      {/* <Tabs defaultValue="all" onValueChange={setStatusFilter}>
+      <Tabs defaultValue="all" onValueChange={setStatusFilter}>
         <TabsList className="mb-4 w-full flex-wrap">
           <TabsTrigger value="all">Barchasi</TabsTrigger>
           <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
@@ -164,7 +197,7 @@ export function OrderHistory() {
           <TabsTrigger value="ready">Tayyor</TabsTrigger>
           <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
         </TabsList>
-      </Tabs> */}
+      </Tabs>
 
       <div className="space-y-4">
         {sortedOrders.map((order) => (

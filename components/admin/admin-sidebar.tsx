@@ -8,13 +8,28 @@ import { usePathname, useRouter } from "next/navigation"
 import { doc, getDoc } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
 import { onAuthStateChanged } from "firebase/auth"
-import { LayoutDashboard, Utensils, BarChart, ChefHat, User, UserPlus, Table, LogOut, MenuIcon, X } from "lucide-react"
+import {
+  LayoutDashboard,
+  Utensils,
+  BarChart,
+  ChefHat,
+  User,
+  UserPlus,
+  Table,
+  LogOut,
+  MenuIcon,
+  X,
+  Settings,
+  BarChart3,
+  History,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { signOut } from "firebase/auth"
 import { useToast } from "@/components/ui/use-toast"
 
 // Create a context for sidebar state
 import { createContext, useContext } from "react"
+import { cn } from "@/lib/utils"
 
 type SidebarContextType = {
   isMobileMenuOpen: boolean
@@ -106,6 +121,54 @@ const NavLink = memo(
 )
 NavLink.displayName = "NavLink"
 
+const adminRoutes = [
+  {
+    title: "Boshqaruv paneli",
+    href: "/admin/dashboard",
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Menyu",
+    href: "/admin/menu",
+    icon: Utensils,
+  },
+  {
+    title: "Oshpaz",
+    href: "/admin/chef",
+    icon: ChefHat,
+  },
+  {
+    title: "Ofitsiant",
+    href: "/admin/waiter",
+    icon: User,
+  },
+  {
+    title: "Statistika",
+    href: "/admin/stats",
+    icon: BarChart3,
+  },
+  {
+    title: "Xodim qo'shish",
+    href: "/admin/register-staff",
+    icon: UserPlus,
+  },
+  {
+    title: "Stollar",
+    href: "/admin/tables",
+    icon: Table,
+  },
+  {
+    title: "Sozlamalar",
+    href: "/admin/settings",
+    icon: Settings,
+  },
+  {
+    title: "Buyurtmalar tarixi",
+    href: "/admin/order-history",
+    icon: History,
+  },
+]
+
 // Memoized sidebar component
 export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) => {
   const { isMobileMenuOpen, toggleMobileMenu, userRole, userName } = useSidebar()
@@ -169,6 +232,13 @@ export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) =
             isActive={isActive("/admin/stats")}
             icon={BarChart}
             label="Statistika"
+            onClick={onClick}
+          />
+          <NavLink
+            href="/admin/settings"
+            isActive={isActive("/admin/settings")}
+            icon={Settings}
+            label="Sozlamalar"
             onClick={onClick}
           />
           <NavLink
@@ -279,7 +349,27 @@ export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) =
         {/* Desktop sidebar for admin - FIXED */}
         <aside className="fixed top-16 bottom-0 left-0 z-20 hidden h-[calc(100vh-4rem)] w-64 overflow-y-auto border-r bg-white md:block">
           <div className="flex h-full flex-col justify-between p-4">
-            <nav className="flex flex-col">{renderNavLinks()}</nav>
+            {/* <nav className="flex flex-col">{renderNavLinks()}</nav> */}
+            <div className="flex h-full w-56 flex-col  bg-white">
+
+              <div className="flex-1 py-2">
+                <nav className="grid items-start px-2 text-sm">
+                  {adminRoutes.map((route, index) => (
+                    <Link
+                      key={index}
+                      href={route.href}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-foreground",
+                        pathname === route.href && "bg-muted text-foreground",
+                      )}
+                    >
+                      <route.icon className="h-4 w-4" />
+                      <span>{route.title}</span>
+                    </Link>
+                  ))}
+                </nav>
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -294,7 +384,27 @@ export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) =
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex h-full flex-col justify-between">
-                <nav className="flex flex-col">{renderNavLinks(true)}</nav>
+                {/* <nav className="flex flex-col">{renderNavLinks(true)}</nav> */}
+                <div className="flex h-full w-52 flex-col  bg-white">
+
+                  <div className="flex-1  py-2">
+                    <nav className="grid items-start px-2 text-sm">
+                      {adminRoutes.map((route, index) => (
+                        <Link
+                          key={index}
+                          href={route.href}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-foreground",
+                            pathname === route.href && "bg-muted text-foreground",
+                          )}
+                        >
+                          <route.icon className="h-4 w-4" />
+                          <span>{route.title}</span>
+                        </Link>
+                      ))}
+                    </nav>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

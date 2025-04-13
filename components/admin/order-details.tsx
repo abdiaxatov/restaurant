@@ -4,19 +4,67 @@ import { useState } from "react"
 import { doc, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
-import { X } from "lucide-react"
+import { Loader2, MapPin, Phone } from "lucide-react"
 import type { Order } from "@/types"
 
 interface OrderDetailsProps {
   order: Order
   onClose: () => void
+  isDeleted?: boolean
 }
 
-export function OrderDetails({ order, onClose }: OrderDetailsProps) {
+export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetailsProps) {
   const [isUpdating, setIsUpdating] = useState(false)
   const { toast } = useToast()
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    if (isDeleted) return // Don't allow status updates for deleted orders
+
+    setIsUpdating(true)
+    try {
+      await updateDoc(doc(db, "orders", order.id), {
+        status: newStatus,
+        updatedAt: new Date(),
+      })
+
+      // Play appropriate sound based on status
+      let soundFile = ""
+      switch (newStatus) {
+        case "preparing":
+          soundFile = "/cooking.mp3"
+          break
+        case "ready":
+          soundFile = "/ready.mp3"
+          break
+        case "completed":
+          soundFile = "/success.mp3"
+          break
+      }
+
+      if (soundFile) {
+        const audio = new Audio(soundFile)
+        audio.play().catch((e) => console.error("Error playing sound:", e))
+      }
+
+      toast({
+        title: "Status yangilandi",
+        description: `Buyurtma statusi "${newStatus}" ga o'zgartirildi`,
+      })
+    } catch (error) {
+      console.error("Error updating order status:", error)
+      toast({
+        title: "Xatolik",
+        description: "Buyurtma statusini yangilashda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUpdating(false)
+    }
+  }
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "N/A"
@@ -43,160 +91,141 @@ export function OrderDetails({ order, onClose }: OrderDetailsProps) {
     }
   }
 
-  const updateOrderStatus = async (newStatus: string) => {
-    if (!order.id) return
-
-    setIsUpdating(true)
-
-    try {
-      await updateDoc(doc(db, "orders", order.id), {
-        status: newStatus,
-      })
-
-      toast({
-        title: "Status yangilandi",
-        description: `Buyurtma statusi ${getStatusText(newStatus)} ga o'zgartirildi`,
-      })
-    } catch (error) {
-      console.error("Error updating order status:", error)
-      toast({
-        title: "Xatolik",
-        description: "Buyurtma statusini yangilashda xatolik yuz berdi",
-        variant: "destructive",
-      })
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
   return (
-    <div className="h-full">
-
-      <div className="mb-6">
-        <div className="mb-2 grid grid-cols-2 gap-2">
-          <div>
-            {order.roomNumber ? (
-              <>
-                <p className="text-sm text-muted-foreground">Xona raqami</p>
-                <p className="font-medium">#{order.roomNumber}</p>
-              </>
-            ) : order.tableNumber ? (
-              <>
-                <p className="text-sm text-muted-foreground">Stol raqami</p>
-                <p className="font-medium">#{order.tableNumber}</p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">Buyurtma turi</p>
-                <p className="font-medium">Yetkazib berish</p>
-              </>
-            )}
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Status</p>
-            <p className="font-medium capitalize">{getStatusText(order.status)}</p>
-          </div>
-        </div>
-        <div className="mb-2">
-          <p className="text-sm text-muted-foreground">Buyurtma vaqti</p>
-          <p className="font-medium">{formatDate(order.createdAt)}</p>
-        </div>
-        {order.phoneNumber && (
-          <div className="mb-2">
-            <p className="text-sm text-muted-foreground">Telefon raqami</p>
-            <p className="font-medium">{order.phoneNumber}</p>
-          </div>
-        )}
-        {order.address && (
-          <div className="mb-2">
-            <p className="text-sm text-muted-foreground">Manzil</p>
-            <p className="font-medium">{order.address}</p>
-          </div>
-        )}
-      </div>
-
-      <div className="mb-6">
-        <h3 className="mb-2 font-semibold">Taomlar</h3>
-        <ul className="divide-y">
-          {order.items.map((item, index) => (
-            <li key={index} className="py-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p>{item.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {formatCurrency(item.price)} × {item.quantity}
-                  </p>
-                </div>
-                <p className="font-medium">{formatCurrency(item.price * item.quantity)}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="mb-6">
-        {order.orderType === "delivery" && (
-          <>
-            <div className="flex items-center justify-between border-t pt-2">
-              <p>Taomlar narxi</p>
-              <p>{formatCurrency(order.subtotal || order.total)}</p>
-            </div>
-            {order.containerCost > 0 && (
-              <div className="flex items-center justify-between">
-                <p>Idishlar narxi</p>
-                <p>{formatCurrency(order.containerCost)}</p>
-              </div>
-            )}
-            {order.deliveryFee > 0 && (
-              <div className="flex items-center justify-between">
-                <p>Yetkazib berish narxi</p>
-                <p>{formatCurrency(order.deliveryFee)}</p>
-              </div>
-            )}
-          </>
-        )}
-        <div className="flex items-center justify-between border-t pt-2">
-          <p className="font-semibold">Jami</p>
-          <p className="font-semibold">{formatCurrency(order.total)}</p>
-        </div>
-      </div>
-
+    <div className="space-y-4">
+      {/* Order header */}
       <div>
-        <h3 className="mb-2 font-semibold">Statusni yangilash</h3>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={order.status === "pending" ? "default" : "outline"}
-            size="sm"
-            disabled={isUpdating || order.status === "pending"}
-            onClick={() => updateOrderStatus("pending")}
-          >
-            Kutilmoqda
-          </Button>
-          <Button
-            variant={order.status === "preparing" ? "default" : "outline"}
-            size="sm"
-            disabled={isUpdating || order.status === "preparing"}
-            onClick={() => updateOrderStatus("preparing")}
-          >
-            Tayyorlanmoqda
-          </Button>
-          <Button
-            variant={order.status === "ready" ? "default" : "outline"}
-            size="sm"
-            disabled={isUpdating || order.status === "ready"}
-            onClick={() => updateOrderStatus("ready")}
-          >
-            Tayyor
-          </Button>
-          <Button
-            variant={order.status === "completed" ? "default" : "outline"}
-            size="sm"
-            disabled={isUpdating || order.status === "completed"}
-            onClick={() => updateOrderStatus("completed")}
-          >
-            Yakunlangan
-          </Button>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">
+            {order.orderType === "table"
+              ? order.roomNumber
+                ? `Xona #${order.roomNumber}`
+                : `Stol #${order.tableNumber}`
+              : "Yetkazib berish"}
+          </h3>
+          <Badge variant="outline">{getStatusText(order.status)}</Badge>
         </div>
+        <p className="text-sm text-muted-foreground">Buyurtma vaqti: {formatDate(order.createdAt)}</p>
+        {order.deletedAt && (
+          <p className="text-sm text-muted-foreground">O'chirilgan vaqti: {formatDate(order.deletedAt)}</p>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Customer info for delivery orders */}
+      {order.orderType === "delivery" && (
+        <div className="rounded-md bg-muted p-3">
+          <h4 className="mb-2 font-medium">Mijoz ma'lumotlari</h4>
+          {order.phoneNumber && (
+            <div className="flex items-center gap-2 text-sm">
+              <Phone className="h-4 w-4 text-muted-foreground" />
+              <span>{order.phoneNumber}</span>
+            </div>
+          )}
+          {order.address && (
+            <div className="flex items-start gap-2 text-sm">
+              <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+              <span>{order.address}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Order items */}
+      <div>
+        <h4 className="mb-2 font-medium">Buyurtma elementlari</h4>
+        <div className="space-y-2 rounded-md border p-3">
+          {order.items.map((item, index) => (
+            <div key={index} className="flex justify-between text-sm">
+              <span>
+                {item.name} × {item.quantity}
+              </span>
+              <span>{formatCurrency(item.price * item.quantity)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Order summary */}
+      <div className="rounded-md bg-muted p-3">
+        <h4 className="mb-2 font-medium">Buyurtma xulasasi</h4>
+        <div className="space-y-1">
+          {order.orderType === "delivery" && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span>Taomlar narxi:</span>
+                <span>{formatCurrency(order.subtotal || 0)}</span>
+              </div>
+              {order.containerCost > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span>Idishlar narxi:</span>
+                  <span>{formatCurrency(order.containerCost)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span>Yetkazib berish narxi:</span>
+                <span>{formatCurrency(order.deliveryFee || 0)}</span>
+              </div>
+              <Separator className="my-1" />
+            </>
+          )}
+          <div className="flex justify-between font-medium">
+            <span>Jami:</span>
+            <span>{formatCurrency(order.total)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Status update buttons */}
+      {!isDeleted && (
+        <div className="space-y-2">
+          <h4 className="font-medium">Buyurtma statusini yangilash</h4>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={order.status === "pending" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("pending")}
+              disabled={isUpdating || order.status === "pending"}
+            >
+              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Kutilmoqda
+            </Button>
+            <Button
+              variant={order.status === "preparing" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("preparing")}
+              disabled={isUpdating || order.status === "preparing"}
+            >
+              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Tayyorlanmoqda
+            </Button>
+            <Button
+              variant={order.status === "ready" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("ready")}
+              disabled={isUpdating || order.status === "ready"}
+            >
+              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Tayyor
+            </Button>
+            <Button
+              variant={order.status === "completed" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("completed")}
+              disabled={isUpdating || order.status === "completed"}
+            >
+              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Yakunlangan
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={onClose}>
+          Yopish
+        </Button>
       </div>
     </div>
   )
