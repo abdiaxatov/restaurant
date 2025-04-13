@@ -1046,21 +1046,6 @@ export function TableManagement() {
                   <Label htmlFor="show-occupied">Band stollarni ko'rsatish</Label>
                 </div>
 
-                {rooms.length > 0 && (
-                  <Select value={selectedRoomFilter || "all"} onValueChange={setSelectedRoomFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Xonani tanlang" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Barcha xonalar</SelectItem>
-                      {rooms.map((room) => (
-                        <SelectItem key={room.id} value={room.id}>
-                          {room.number} xona
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
               </div>
 
               <div className="flex gap-2">
@@ -1096,22 +1081,6 @@ export function TableManagement() {
                             onChange={(e) => setNewTableSeats(Number.parseInt(e.target.value) || 4)}
                           />
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="tableRoom">Xona</Label>
-                        <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
-                          <SelectTrigger id="tableRoom">
-                            <SelectValue placeholder="Xonani tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Xonasiz</SelectItem>
-                            {rooms.map((room) => (
-                              <SelectItem key={room.id} value={room.id}>
-                                {room.number} xona
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="tableStatus">Status</Label>
@@ -1189,22 +1158,6 @@ export function TableManagement() {
                           value={batchTableSeats}
                           onChange={(e) => setBatchTableSeats(Number.parseInt(e.target.value) || 4)}
                         />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="batchRoom">Xona</Label>
-                        <Select value={batchTableRoomId || "none"} onValueChange={setBatchTableRoomId}>
-                          <SelectTrigger id="batchRoom">
-                            <SelectValue placeholder="Xonani tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Xonasiz</SelectItem>
-                            {rooms.map((room) => (
-                              <SelectItem key={room.id} value={room.id}>
-                                {room.number} xona
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </div>
                     </div>
                     <DialogFooter>
