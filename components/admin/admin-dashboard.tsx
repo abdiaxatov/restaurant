@@ -21,18 +21,50 @@ import { OrderList } from "@/components/admin/order-list"
 import { OrderDetails } from "@/components/admin/order-details"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
-import { ShoppingBag, DollarSign, Clock, Truck, Loader2 } from "lucide-react"
+import {
+  ShoppingBag,
+  DollarSign,
+  Clock,
+  Truck,
+  Loader2,
+  Search,
+  Filter,
+  ArrowUpRight,
+  ArrowDownRight,
+  Bell,
+  BarChart,
+  ChevronRight,
+  Utensils,
+} from "lucide-react"
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts"
 import type { Order } from "@/types"
+import { format, subDays, startOfDay, endOfDay } from "date-fns"
 
 export function AdminDashboard() {
   const [orders, setOrders] = useState<Order[]>([])
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [orderTypeFilter, setOrderTypeFilter] = useState<"all" | "table" | "delivery">("all")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [dateFilter, setDateFilter] = useState<string>("")
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
   const [isLoading, setIsLoading] = useState(true)
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false)
   const { toast } = useToast()
@@ -41,17 +73,47 @@ export function AdminDashboard() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [comparisonData, setComparisonData] = useState({
+    ordersChange: 0,
+    revenueChange: 0,
+  })
+  const [topItems, setTopItems] = useState<{ name: string; count: number; value: number }[]>([])
+  const [revenueData, setRevenueData] = useState<{ date: string; revenue: number }[]>([])
 
   useEffect(() => {
     // Initialize audio element
     audioRef.current = new Audio("/notification.mp3")
 
-    const ordersQuery = query(collection(db, "orders"), orderBy("createdAt", "desc"))
+    // Get today's date range
+    const today = new Date()
+    const startOfToday = startOfDay(today)
+    const endOfToday = endOfDay(today)
 
+    // Get yesterday's date range for comparison
+    const yesterday = subDays(today, 1)
+    const startOfYesterday = startOfDay(yesterday)
+    const endOfYesterday = endOfDay(yesterday)
+
+    // Query for today's orders
+    const ordersQuery = query(collection(db, "orders"), orderBy("createdAt", sortOrder))
+
+    // Query for yesterday's orders (for comparison)
+    const yesterdayOrdersQuery = query(
+      collection(db, "orders"),
+      where("createdAt", ">=", startOfYesterday),
+      where("createdAt", "<=", endOfYesterday),
+    )
+
+    // Listen for real-time updates to orders
     const unsubscribe = onSnapshot(
       ordersQuery,
       (snapshot) => {
         const ordersList: Order[] = []
+        let todayOrderCount = 0
+        let todayRevenue = 0
+        const itemCounts: Record<string, number> = {}
+        const dailyData: Record<string, number> = {}
+
         snapshot.forEach((doc) => {
           const data = doc.data()
           // Make sure delivery orders don't have table numbers
@@ -59,8 +121,56 @@ export function AdminDashboard() {
             data.tableNumber = null
             data.roomNumber = null
           }
-          ordersList.push({ id: doc.id, ...data } as Order)
+
+          const order = { id: doc.id, ...data } as Order
+          ordersList.push(order)
+
+          // Count today's orders and revenue
+          const orderDate = order.createdAt?.toDate ? new Date(order.createdAt.toDate()) : null
+          if (orderDate && orderDate >= startOfToday && orderDate <= endOfToday) {
+            todayOrderCount++
+            todayRevenue += order.total
+
+            // Count items for popularity
+            order.items.forEach((item: { name: string; quantity: number }) => {
+              if (itemCounts[item.name]) {
+                itemCounts[item.name] += item.quantity
+              } else {
+                itemCounts[item.name] = item.quantity
+              }
+            })
+          }
+
+          // Aggregate daily data for the last 7 days
+          if (orderDate) {
+            const dateKey = format(orderDate, "MM-dd")
+            if (!dailyData[dateKey]) {
+              dailyData[dateKey] = 0
+            }
+            dailyData[dateKey] += order.total
+          }
         })
+
+        // Prepare revenue data for chart
+        const last7Days = Array.from({ length: 7 }, (_, i) => {
+          const date = subDays(new Date(), i)
+          const dateKey = format(date, "MM-dd")
+          const dateLabel = format(date, "dd MMM")
+          return {
+            date: dateLabel,
+            revenue: dailyData[dateKey] || 0,
+          }
+        }).reverse()
+
+        setRevenueData(last7Days)
+
+        // Convert to array and sort by count for top items
+        const topItemsArray = Object.entries(itemCounts)
+          .map(([name, count]) => ({ name, count, value: count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5)
+
+        setTopItems(topItemsArray)
         setOrders(ordersList)
         setIsLoading(false)
 
@@ -71,6 +181,34 @@ export function AdminDashboard() {
           audioRef.current?.play().catch((e) => console.error("Error playing notification sound:", e))
         }
         previousOrderCountRef.current = pendingOrders.length
+
+        // Get yesterday's data for comparison
+        getDocs(yesterdayOrdersQuery)
+          .then((yesterdaySnapshot) => {
+            let yesterdayOrderCount = 0
+            let yesterdayRevenue = 0
+
+            yesterdaySnapshot.forEach((doc) => {
+              const order = doc.data() as Order
+              yesterdayOrderCount++
+              yesterdayRevenue += order.total
+            })
+
+            // Calculate percentage changes
+            const ordersChange =
+              yesterdayOrderCount > 0 ? ((todayOrderCount - yesterdayOrderCount) / yesterdayOrderCount) * 100 : 0
+
+            const revenueChange =
+              yesterdayRevenue > 0 ? ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100 : 0
+
+            setComparisonData({
+              ordersChange,
+              revenueChange,
+            })
+          })
+          .catch((error) => {
+            console.error("Error fetching yesterday's orders:", error)
+          })
       },
       (error) => {
         console.error("Error fetching orders:", error)
@@ -84,7 +222,7 @@ export function AdminDashboard() {
     )
 
     return () => unsubscribe()
-  }, [toast])
+  }, [toast, sortOrder])
 
   // Handle order selection
   const handleSelectOrder = (order: Order) => {
@@ -170,11 +308,38 @@ export function AdminDashboard() {
     }
   }
 
-  // Filter orders based on status and type
+  // Filter orders based on status, type, date, and search query
   const filteredOrders = orders.filter((order) => {
+    // Filter by status
     const statusMatch = statusFilter === "all" || order.status === statusFilter
+
+    // Filter by type
     const typeMatch = orderTypeFilter === "all" || order.orderType === orderTypeFilter
-    return statusMatch && typeMatch
+
+    // Filter by date
+    let dateMatch = true
+    if (dateFilter) {
+      const orderDate = order.createdAt?.toDate ? format(new Date(order.createdAt.toDate()), "yyyy-MM-dd") : ""
+      dateMatch = orderDate === dateFilter
+    }
+
+    // Filter by search query
+    let searchMatch = true
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      searchMatch =
+        order.tableNumber?.toString().includes(query) ||
+        false ||
+        order.roomNumber?.toString().includes(query) ||
+        false ||
+        order.phoneNumber?.toLowerCase().includes(query) ||
+        false ||
+        order.address?.toLowerCase().includes(query) ||
+        false ||
+        order.items.some((item) => item.name.toLowerCase().includes(query))
+    }
+
+    return statusMatch && typeMatch && dateMatch && searchMatch
   })
 
   // Count orders by status
@@ -190,43 +355,95 @@ export function AdminDashboard() {
   // Calculate total revenue
   const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0)
 
+  // Calculate today's revenue
+  const today = new Date()
+  const startOfToday = startOfDay(today)
+  const endOfToday = endOfDay(today)
+
+  const todayOrders = orders.filter((order) => {
+    const orderDate = order.createdAt?.toDate ? new Date(order.createdAt.toDate()) : null
+    return orderDate && orderDate >= startOfToday && orderDate <= endOfToday
+  })
+
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total, 0)
+  const todayOrdersCount = todayOrders.length
+
+  const renderChangeIndicator = (value: number) => {
+    if (value > 0) {
+      return (
+        <div className="flex items-center text-green-600">
+          <ArrowUpRight className="mr-1 h-4 w-4" />
+          <span>+{value.toFixed(1)}%</span>
+        </div>
+      )
+    } else if (value < 0) {
+      return (
+        <div className="flex items-center text-red-600">
+          <ArrowDownRight className="mr-1 h-4 w-4" />
+          <span>{value.toFixed(1)}%</span>
+        </div>
+      )
+    }
+    return <span className="text-muted-foreground">0%</span>
+  }
+
+  const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d"]
+
   return (
     <AdminLayout>
-      <div className="flex flex-1 flex-col">
-        <div className="border-b bg-white p-4">
+      <div className="container mx-auto p-4">
+        <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Boshqaruv paneli</h1>
+
+          {pendingCount > 0 && (
+            <div className="flex items-center">
+              <Badge variant="destructive" className="mr-2 animate-pulse">
+                {pendingCount} yangi buyurtma
+              </Badge>
+              <Bell className="h-5 w-5 text-amber-500" />
+            </div>
+          )}
         </div>
 
-        <div className="grid gap-4 p-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="transition-all hover:shadow-md">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Jami buyurtmalar</CardTitle>
+              <CardTitle className="text-sm font-medium">Bugungi buyurtmalar</CardTitle>
               <ShoppingBag className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{orders.length}</div>
-              <div className="mt-1 flex gap-2">
-                <Badge variant="outline" className="text-xs">
-                  Stol: {tableOrdersCount}
-                </Badge>
-                <Badge variant="outline" className="text-xs">
-                  Yetkazib berish: {deliveryOrdersCount}
-                </Badge>
+              <div className="text-2xl font-bold">{todayOrdersCount}</div>
+              <div className="mt-1 flex items-center justify-between">
+                <div className="flex gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    Stol: {todayOrders.filter((o) => o.orderType === "table").length}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">
+                    Yetkazib berish: {todayOrders.filter((o) => o.orderType === "delivery").length}
+                  </Badge>
+                </div>
+                {renderChangeIndicator(comparisonData.ordersChange)}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="transition-all hover:shadow-md">
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Jami tushum</CardTitle>
+              <CardTitle className="text-sm font-medium">Bugungi tushum</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalRevenue)}</div>
+              <div className="text-2xl font-bold">{formatCurrency(todayRevenue)}</div>
+              <div className="mt-1 flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  O'rtacha: {todayOrdersCount > 0 ? formatCurrency(todayRevenue / todayOrdersCount) : formatCurrency(0)}
+                </span>
+                {renderChangeIndicator(comparisonData.revenueChange)}
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="transition-all hover:shadow-md">
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Kutilayotgan buyurtmalar</CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
@@ -234,124 +451,290 @@ export function AdminDashboard() {
             <CardContent>
               <div className="text-2xl font-bold">{pendingCount + preparingCount + readyCount}</div>
               <div className="mt-1 flex flex-wrap gap-2">
-                <Badge variant="outline" className="text-xs">
+                <Badge
+                  variant="outline"
+                  className={`text-xs ${pendingCount > 0 ? "bg-yellow-100 text-yellow-800" : ""}`}
+                >
                   Kutilmoqda: {pendingCount}
                 </Badge>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className={`text-xs ${preparingCount > 0 ? "bg-blue-100 text-blue-800" : ""}`}>
                   Tayyorlanmoqda: {preparingCount}
                 </Badge>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className={`text-xs ${readyCount > 0 ? "bg-green-100 text-green-800" : ""}`}>
                   Tayyor: {readyCount}
                 </Badge>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="transition-all hover:shadow-md">
+          <Card className="shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Yakunlangan buyurtmalar</CardTitle>
               <Truck className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{completedCount}</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Jami:{" "}
+                {formatCurrency(orders.filter((o) => o.status === "completed").reduce((sum, o) => sum + o.total, 0))}
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="flex flex-1 flex-col p-4">
-          <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <Tabs
-              defaultValue="all"
-              onValueChange={(value) => setOrderTypeFilter(value as "all" | "table" | "delivery")}
-            >
-              <TabsList>
-                <TabsTrigger value="all">
-                  Barchasi{" "}
-                  <Badge variant="secondary" className="ml-1">
-                    {orders.length}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="table">
-                  Stol buyurtmalari{" "}
-                  <Badge variant="secondary" className="ml-1">
-                    {tableOrdersCount}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="delivery">
-                  Yetkazib berish{" "}
-                  <Badge variant="secondary" className="ml-1">
-                    {deliveryOrdersCount}
-                  </Badge>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+        <div className="mt-8 grid gap-6 md:grid-cols-2">
+          {/* Weekly Revenue Chart */}
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart className="h-5 w-5" />
+                Haftalik tushum
+              </CardTitle>
+              <CardDescription>So'nggi 7 kun uchun tushum</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[250px]">
+                {revenueData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={revenueData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis tickFormatter={(value) => formatCurrency(value).replace(/\s+/g, "")} />
+                      <RechartsTooltip formatter={(value) => [formatCurrency(value as number), "Tushum"]} />
+                      <Area
+                        type="monotone"
+                        dataKey="revenue"
+                        name="Tushum"
+                        stroke="#8884d8"
+                        fill="#8884d8"
+                        fillOpacity={0.3}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end">
+              <Button variant="ghost" size="sm" asChild>
+                <a href="/admin/stats">
+                  Batafsil <ChevronRight className="ml-1 h-4 w-4" />
+                </a>
+              </Button>
+            </CardFooter>
+          </Card>
 
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              <button
-                onClick={() => setStatusFilter("all")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  statusFilter === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Barchasi
-              </button>
-              <button
-                onClick={() => setStatusFilter("pending")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  statusFilter === "pending" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Kutilmoqda{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {pendingCount}
-                </Badge>
-              </button>
-              <button
-                onClick={() => setStatusFilter("preparing")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  statusFilter === "preparing" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Tayyorlanmoqda{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {preparingCount}
-                </Badge>
-              </button>
-              <button
-                onClick={() => setStatusFilter("ready")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  statusFilter === "ready" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Tayyor{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {readyCount}
-                </Badge>
-              </button>
-              <button
-                onClick={() => setStatusFilter("completed")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  statusFilter === "completed" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Yakunlangan{" "}
-                <Badge variant="secondary" className="ml-1">
-                  {completedCount}
-                </Badge>
-              </button>
-            </div>
-          </div>
+          {/* Top Items Chart */}
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Utensils className="h-5 w-5" />
+                Eng mashhur taomlar
+              </CardTitle>
+              <CardDescription>Bugun eng ko'p buyurtma qilingan taomlar</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[250px]">
+                {topItems.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={topItems}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {topItems.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end">
+              <Button variant="ghost" size="sm" asChild>
+                <a href="/admin/stats">
+                  Batafsil <ChevronRight className="ml-1 h-4 w-4" />
+                </a>
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
 
-          {isLoading ? (
-            <p>Buyurtmalar yuklanmoqda...</p>
-          ) : (
-            <OrderList
-              orders={filteredOrders}
-              selectedOrderId={selectedOrder?.id}
-              onSelectOrder={handleSelectOrder}
-              onDeleteOrder={handleDeleteClick}
-            />
-          )}
+        <div className="mt-8">
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Buyurtmalar</CardTitle>
+              <CardDescription>Barcha buyurtmalarni ko'rish va boshqarish</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <Tabs
+                    defaultValue="all"
+                    value={orderTypeFilter}
+                    onValueChange={(value) => setOrderTypeFilter(value as "all" | "table" | "delivery")}
+                  >
+                    <TabsList>
+                      <TabsTrigger value="all">
+                        Barchasi{" "}
+                        <Badge variant="secondary" className="ml-1">
+                          {orders.length}
+                        </Badge>
+                      </TabsTrigger>
+                      <TabsTrigger value="table">
+                        Stol buyurtmalari{" "}
+                        <Badge variant="secondary" className="ml-1">
+                          {tableOrdersCount}
+                        </Badge>
+                      </TabsTrigger>
+                      <TabsTrigger value="delivery">
+                        Yetkazib berish{" "}
+                        <Badge variant="secondary" className="ml-1">
+                          {deliveryOrdersCount}
+                        </Badge>
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+
+                  <Input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => setDateFilter(e.target.value)}
+                    className="w-auto"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Buyurtmalarni qidirish..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+
+                  <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as "asc" | "desc")}>
+                    <SelectTrigger className="w-[180px]">
+                      <div className="flex items-center gap-2">
+                        <Filter className="h-4 w-4" />
+                        <SelectValue placeholder="Saralash" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="desc">Eng yangi</SelectItem>
+                      <SelectItem value="asc">Eng eski</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  <button
+                    onClick={() => setStatusFilter("all")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    Barchasi
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("pending")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "pending"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    Kutilmoqda{" "}
+                    <Badge variant="secondary" className="ml-1">
+                      {pendingCount}
+                    </Badge>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("preparing")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "preparing"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    Tayyorlanmoqda{" "}
+                    <Badge variant="secondary" className="ml-1">
+                      {preparingCount}
+                    </Badge>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("ready")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "ready" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    Tayyor{" "}
+                    <Badge variant="secondary" className="ml-1">
+                      {readyCount}
+                    </Badge>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("completed")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "completed"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    Yakunlangan{" "}
+                    <Badge variant="secondary" className="ml-1">
+                      {completedCount}
+                    </Badge>
+                  </button>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="flex h-60 items-center justify-center">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="flex h-60 flex-col items-center justify-center rounded-lg border border-dashed">
+                  <ShoppingBag className="mb-2 h-10 w-10 text-muted-foreground" />
+                  <p className="text-muted-foreground">Buyurtmalar topilmadi</p>
+                  {searchQuery && (
+                    <Button variant="ghost" size="sm" className="mt-2" onClick={() => setSearchQuery("")}>
+                      Qidiruvni tozalash
+                    </Button>
+                  )}
+                  {dateFilter && (
+                    <Button variant="ghost" size="sm" className="mt-2" onClick={() => setDateFilter("")}>
+                      Sana filtrini tozalash
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <OrderList
+                  orders={filteredOrders}
+                  selectedOrderId={selectedOrder?.id}
+                  onSelectOrder={handleSelectOrder}
+                  onDeleteOrder={handleDeleteClick}
+                />
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Order Details Modal */}

@@ -4,28 +4,43 @@ import { useState, useEffect } from "react"
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
-import { BarChart, DollarSign, ShoppingBag, Utensils, PieChart, Download } from "lucide-react"
+import {
+  BarChart,
+  DollarSign,
+  ShoppingBag,
+  Utensils,
+  PieChart,
+  Download,
+  Calendar,
+  TrendingUp,
+  Users,
+  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+} from "lucide-react"
 import {
   BarChart as RechartsBarChart,
   Bar,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   PieChart as RechartsPieChart,
   Pie,
   Cell,
   Legend,
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
 } from "recharts"
 import * as XLSX from "xlsx"
+import { format, subDays } from "date-fns"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface TopItem {
   name: string
@@ -36,6 +51,7 @@ interface TopItem {
 interface DailyRevenue {
   date: string
   revenue: number
+  orders: number
 }
 
 interface OrdersByStatus {
@@ -54,11 +70,16 @@ export function StatsPage() {
   const [todayOrders, setTodayOrders] = useState(0)
   const [todayRevenue, setTodayRevenue] = useState(0)
   const [topItems, setTopItems] = useState<TopItem[]>([])
-  const [weeklyRevenue, setWeeklyRevenue] = useState<DailyRevenue[]>([])
+  const [revenueData, setRevenueData] = useState<DailyRevenue[]>([])
   const [ordersByStatus, setOrdersByStatus] = useState<OrdersByStatus[]>([])
   const [ordersByType, setOrdersByType] = useState<OrdersByType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [timeRange, setTimeRange] = useState<"today" | "week" | "month">("today")
+  const [comparisonData, setComparisonData] = useState({
+    ordersChange: 0,
+    revenueChange: 0,
+    averageOrderChange: 0,
+  })
   const { toast } = useToast()
 
   const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d"]
@@ -66,6 +87,8 @@ export function StatsPage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        setIsLoading(true)
+
         // Get date range based on selected time range
         const today = new Date()
         today.setHours(0, 0, 0, 0)
@@ -77,19 +100,39 @@ export function StatsPage() {
           startDate.setMonth(today.getMonth() - 1)
         }
 
-        const tomorrow = new Date(today)
-        tomorrow.setDate(tomorrow.getDate() + 1)
+        const endDate = new Date()
+        endDate.setHours(23, 59, 59, 999)
+
+        // For comparison with previous period
+        const previousStartDate = new Date(startDate)
+        const previousEndDate = new Date(startDate)
+        previousStartDate.setDate(
+          previousStartDate.getDate() - (timeRange === "today" ? 1 : timeRange === "week" ? 7 : 30),
+        )
+        previousEndDate.setDate(previousEndDate.getDate() - 1)
 
         // Query for orders in the selected time range
         const ordersQuery = query(
           collection(db, "orders"),
           where("createdAt", ">=", startDate),
-          where("createdAt", "<", tomorrow),
+          where("createdAt", "<=", endDate),
           orderBy("createdAt", "asc"),
         )
 
-        const ordersSnapshot = await getDocs(ordersQuery)
+        // Query for orders in the previous period
+        const previousOrdersQuery = query(
+          collection(db, "orders"),
+          where("createdAt", ">=", previousStartDate),
+          where("createdAt", "<=", previousEndDate),
+          orderBy("createdAt", "asc"),
+        )
 
+        const [ordersSnapshot, previousOrdersSnapshot] = await Promise.all([
+          getDocs(ordersQuery),
+          getDocs(previousOrdersQuery),
+        ])
+
+        // Current period stats
         let orderCount = 0
         let revenue = 0
         const itemCounts: Record<string, number> = {}
@@ -104,13 +147,16 @@ export function StatsPage() {
           delivery: 0,
         }
 
+        // Daily/weekly/monthly data for charts
+        const dailyData: Record<string, { revenue: number; orders: number }> = {}
+
         ordersSnapshot.forEach((doc) => {
           const order = doc.data()
           orderCount++
           revenue += order.total
 
           // Count items for popularity
-          order.items.forEach((item: { name: string; quantity: number }) => {
+          order.items.forEach((item: { name: string; quantity: number; price: number }) => {
             if (itemCounts[item.name]) {
               itemCounts[item.name] += item.quantity
             } else {
@@ -127,6 +173,43 @@ export function StatsPage() {
           if (typeCounts[order.orderType] !== undefined) {
             typeCounts[order.orderType]++
           }
+
+          // Aggregate daily data
+          const orderDate = order.createdAt.toDate()
+          const dateKey = format(orderDate, timeRange === "today" ? "HH:00" : "yyyy-MM-dd")
+
+          if (!dailyData[dateKey]) {
+            dailyData[dateKey] = { revenue: 0, orders: 0 }
+          }
+
+          dailyData[dateKey].revenue += order.total
+          dailyData[dateKey].orders += 1
+        })
+
+        // Previous period stats
+        let previousOrderCount = 0
+        let previousRevenue = 0
+
+        previousOrdersSnapshot.forEach((doc) => {
+          const order = doc.data()
+          previousOrderCount++
+          previousRevenue += order.total
+        })
+
+        // Calculate changes
+        const ordersChange = previousOrderCount > 0 ? ((orderCount - previousOrderCount) / previousOrderCount) * 100 : 0
+
+        const revenueChange = previousRevenue > 0 ? ((revenue - previousRevenue) / previousRevenue) * 100 : 0
+
+        const currentAvgOrder = orderCount > 0 ? revenue / orderCount : 0
+        const previousAvgOrder = previousOrderCount > 0 ? previousRevenue / previousOrderCount : 0
+        const averageOrderChange =
+          previousAvgOrder > 0 ? ((currentAvgOrder - previousAvgOrder) / previousAvgOrder) * 100 : 0
+
+        setComparisonData({
+          ordersChange,
+          revenueChange,
+          averageOrderChange,
         })
 
         // Convert to array and sort by count
@@ -155,42 +238,38 @@ export function StatsPage() {
         setOrdersByStatus(ordersByStatusArray)
         setOrdersByType(ordersByTypeArray)
 
-        // Get weekly/monthly revenue data
-        if (timeRange === "week" || timeRange === "month") {
-          const daysToFetch = timeRange === "week" ? 7 : 30
-          const weeklyData: DailyRevenue[] = []
+        // Prepare time series data for charts
+        const timeSeriesData: DailyRevenue[] = []
 
-          for (let i = daysToFetch - 1; i >= 0; i--) {
-            const date = new Date()
-            date.setDate(date.getDate() - i)
-            date.setHours(0, 0, 0, 0)
-
-            const nextDate = new Date(date)
-            nextDate.setDate(nextDate.getDate() + 1)
-
-            const dayQuery = query(
-              collection(db, "orders"),
-              where("createdAt", ">=", date),
-              where("createdAt", "<", nextDate),
-            )
-
-            const daySnapshot = await getDocs(dayQuery)
-            let dayRevenue = 0
-
-            daySnapshot.forEach((doc) => {
-              dayRevenue += doc.data().total
+        if (timeRange === "today") {
+          // For today, show hourly data
+          for (let hour = 0; hour < 24; hour++) {
+            const hourKey = `${hour.toString().padStart(2, "0")}:00`
+            const hourData = dailyData[hourKey] || { revenue: 0, orders: 0 }
+            timeSeriesData.push({
+              date: hourKey,
+              revenue: hourData.revenue,
+              orders: hourData.orders,
             })
-
-            const dateStr = date.toLocaleDateString("uz-UZ", {
-              day: "numeric",
-              month: "short",
-            })
-            weeklyData.push({ date: dateStr, revenue: dayRevenue })
           }
+        } else {
+          // For week/month, show daily data
+          const daysToShow = timeRange === "week" ? 7 : 30
+          for (let i = daysToShow - 1; i >= 0; i--) {
+            const date = subDays(new Date(), i)
+            const dateKey = format(date, "yyyy-MM-dd")
+            const dateStr = format(date, "dd MMM")
+            const dayData = dailyData[dateKey] || { revenue: 0, orders: 0 }
 
-          setWeeklyRevenue(weeklyData)
+            timeSeriesData.push({
+              date: dateStr,
+              revenue: dayData.revenue,
+              orders: dayData.orders,
+            })
+          }
         }
 
+        setRevenueData(timeSeriesData)
         setIsLoading(false)
       } catch (error) {
         console.error("Error fetching stats:", error)
@@ -236,12 +315,12 @@ export function StatsPage() {
       ]
 
       // Add revenue data if available
-      if (weeklyRevenue.length > 0) {
+      if (revenueData.length > 0) {
         mainStats.push([])
         mainStats.push([timeRange === "week" ? "Haftalik tushum" : "Oylik tushum"])
-        mainStats.push(["Sana", "Tushum"])
-        weeklyRevenue.forEach((item) => {
-          mainStats.push([item.date, item.revenue])
+        mainStats.push(["Sana", "Tushum", "Buyurtmalar"])
+        revenueData.forEach((item) => {
+          mainStats.push([item.date, item.revenue, item.orders])
         })
       }
 
@@ -276,24 +355,52 @@ export function StatsPage() {
     }
   }
 
+  const renderChangeIndicator = (value: number) => {
+    if (value > 0) {
+      return (
+        <div className="flex items-center text-green-600">
+          <ArrowUpRight className="mr-1 h-4 w-4" />
+          <span>+{value.toFixed(1)}%</span>
+        </div>
+      )
+    } else if (value < 0) {
+      return (
+        <div className="flex items-center text-red-600">
+          <ArrowDownRight className="mr-1 h-4 w-4" />
+          <span>{value.toFixed(1)}%</span>
+        </div>
+      )
+    }
+    return <span className="text-muted-foreground">0%</span>
+  }
+
   return (
     <AdminLayout>
-      <div className="p-6">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="container mx-auto p-4">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-bold">Statistika</h1>
 
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <Tabs defaultValue={timeRange} onValueChange={(value) => setTimeRange(value as "today" | "week" | "month")}>
               <TabsList>
-                <TabsTrigger value="today">Bugun</TabsTrigger>
-                <TabsTrigger value="week">Hafta</TabsTrigger>
-                <TabsTrigger value="month">Oy</TabsTrigger>
+                <TabsTrigger value="today" className="flex items-center gap-1">
+                  <Clock className="h-4 w-4" />
+                  <span className="hidden sm:inline">Bugun</span>
+                </TabsTrigger>
+                <TabsTrigger value="week" className="flex items-center gap-1">
+                  <Calendar className="h-4 w-4" />
+                  <span className="hidden sm:inline">Hafta</span>
+                </TabsTrigger>
+                <TabsTrigger value="month" className="flex items-center gap-1">
+                  <BarChart className="h-4 w-4" />
+                  <span className="hidden sm:inline">Oy</span>
+                </TabsTrigger>
               </TabsList>
             </Tabs>
 
-            <Button variant="outline" onClick={exportToExcel}>
-              <Download className="mr-2 h-4 w-4" />
-              Excel
+            <Button variant="outline" onClick={exportToExcel} className="flex items-center gap-2">
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">Excel</span>
             </Button>
           </div>
         </div>
@@ -301,41 +408,39 @@ export function StatsPage() {
         {isLoading ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i}>
+              <Card key={i} className="overflow-hidden">
                 <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="h-4 w-24 animate-pulse rounded bg-muted"></div>
-                    <div className="h-4 w-4 animate-pulse rounded bg-muted"></div>
-                  </div>
+                  <Skeleton className="h-4 w-24" />
                 </CardHeader>
                 <CardContent>
-                  <div className="h-8 w-20 animate-pulse rounded bg-muted"></div>
+                  <Skeleton className="h-8 w-20 mb-2" />
+                  <Skeleton className="h-4 w-32" />
                 </CardContent>
               </Card>
             ))}
 
             <Card className="col-span-2">
               <CardHeader>
-                <div className="h-5 w-40 animate-pulse rounded bg-muted"></div>
+                <Skeleton className="h-5 w-40" />
               </CardHeader>
               <CardContent>
-                <div className="h-[200px] w-full animate-pulse rounded bg-muted"></div>
+                <Skeleton className="h-[200px] w-full" />
               </CardContent>
             </Card>
 
             <Card className="col-span-2">
               <CardHeader>
-                <div className="h-5 w-40 animate-pulse rounded bg-muted"></div>
+                <Skeleton className="h-5 w-40" />
               </CardHeader>
               <CardContent>
-                <div className="h-[200px] w-full animate-pulse rounded bg-muted"></div>
+                <Skeleton className="h-[200px] w-full" />
               </CardContent>
             </Card>
           </div>
         ) : (
           <>
             <div className="mb-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
+              <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium">
                     {timeRange === "today"
@@ -348,10 +453,16 @@ export function StatsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{todayOrders}</div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      O'tgan {timeRange === "today" ? "kun" : timeRange === "week" ? "hafta" : "oy"}ga nisbatan
+                    </span>
+                    {renderChangeIndicator(comparisonData.ordersChange)}
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium">
                     {timeRange === "today"
@@ -364,22 +475,34 @@ export function StatsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{formatCurrency(todayRevenue)}</div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      O'tgan {timeRange === "today" ? "kun" : timeRange === "week" ? "hafta" : "oy"}ga nisbatan
+                    </span>
+                    {renderChangeIndicator(comparisonData.revenueChange)}
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium">O'rtacha buyurtma qiymati</CardTitle>
-                  <BarChart className="h-4 w-4 text-muted-foreground" />
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
                     {todayOrders > 0 ? formatCurrency(todayRevenue / todayOrders) : formatCurrency(0)}
                   </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      O'tgan {timeRange === "today" ? "kun" : timeRange === "week" ? "hafta" : "oy"}ga nisbatan
+                    </span>
+                    {renderChangeIndicator(comparisonData.averageOrderChange)}
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium">Buyurtma turlari</CardTitle>
                   <PieChart className="h-4 w-4 text-muted-foreground" />
@@ -402,7 +525,7 @@ export function StatsPage() {
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value) => [value, "Buyurtmalar soni"]} />
+                          <RechartsTooltip formatter={(value) => [value, "Buyurtmalar soni"]} />
                         </RechartsPieChart>
                       </ResponsiveContainer>
                     ) : (
@@ -415,8 +538,55 @@ export function StatsPage() {
               </Card>
             </div>
 
+            <div className="mb-8">
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart className="h-5 w-5" />
+                    {timeRange === "today"
+                      ? "Bugungi tushum (soatlar bo'yicha)"
+                      : timeRange === "week"
+                        ? "Haftalik tushum"
+                        : "Oylik tushum"}
+                  </CardTitle>
+                  <CardDescription>Jami tushum: {formatCurrency(todayRevenue)}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    {revenueData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={revenueData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis tickFormatter={(value) => formatCurrency(value).replace(/\s+/g, "")} />
+                          <RechartsTooltip
+                            formatter={(value, name) => [
+                              formatCurrency(value as number),
+                              name === "revenue" ? "Tushum" : "Buyurtmalar",
+                            ]}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="revenue"
+                            name="Tushum"
+                            stroke="#8884d8"
+                            fill="#8884d8"
+                            fillOpacity={0.3}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             <div className="grid gap-6 md:grid-cols-2">
-              <Card className="col-span-2 md:col-span-1">
+              <Card className="shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Utensils className="h-5 w-5" />
@@ -442,18 +612,20 @@ export function StatsPage() {
                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={formatTooltipValue} />
+                          <RechartsTooltip formatter={formatTooltipValue} />
                           <Legend />
                         </RechartsPieChart>
                       </ResponsiveContainer>
                     </div>
                   ) : (
-                    <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                    <div className="flex h-[300px] items-center justify-center">
+                      <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                    </div>
                   )}
                 </CardContent>
               </Card>
 
-              <Card className="col-span-2 md:col-span-1">
+              <Card className="shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <PieChart className="h-5 w-5" />
@@ -479,59 +651,37 @@ export function StatsPage() {
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip />
+                          <RechartsTooltip />
                           <Legend />
                         </RechartsPieChart>
                       </ResponsiveContainer>
                     </div>
                   ) : (
-                    <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                    <div className="flex h-[300px] items-center justify-center">
+                      <p className="text-center text-muted-foreground">Ma'lumot yo'q</p>
+                    </div>
                   )}
                 </CardContent>
               </Card>
 
-              {(timeRange === "week" || timeRange === "month") && weeklyRevenue.length > 0 && (
-                <Card className="col-span-2">
+              {(timeRange === "week" || timeRange === "month") && revenueData.length > 0 && (
+                <Card className="col-span-2 shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <BarChart className="h-5 w-5" />
-                      {timeRange === "week" ? "Haftalik tushum" : "Oylik tushum"}
+                      <Users className="h-5 w-5" />
+                      {timeRange === "week" ? "Haftalik buyurtmalar soni" : "Oylik buyurtmalar soni"}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <RechartsBarChart data={weeklyRevenue}>
+                        <RechartsBarChart data={revenueData}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="date" />
-                          <YAxis tickFormatter={(value) => formatCurrency(value).replace(/\s+/g, "")} />
-                          <Tooltip formatter={(value) => [formatCurrency(value as number), "Tushum"]} />
-                          <Bar dataKey="revenue" fill="#8884d8" name="Tushum" />
+                          <YAxis />
+                          <RechartsTooltip formatter={(value) => [value, "Buyurtmalar soni"]} />
+                          <Bar dataKey="orders" fill="#82ca9d" name="Buyurtmalar soni" />
                         </RechartsBarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {(timeRange === "week" || timeRange === "month") && weeklyRevenue.length > 0 && (
-                <Card className="col-span-2">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <BarChart className="h-5 w-5" />
-                      {timeRange === "week" ? "Haftalik tushum (chiziq)" : "Oylik tushum (chiziq)"}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={weeklyRevenue}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" />
-                          <YAxis tickFormatter={(value) => formatCurrency(value).replace(/\s+/g, "")} />
-                          <Tooltip formatter={(value) => [formatCurrency(value as number), "Tushum"]} />
-                          <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Tushum" strokeWidth={2} />
-                        </LineChart>
                       </ResponsiveContainer>
                     </div>
                   </CardContent>

@@ -117,15 +117,6 @@ export function AdminLogin() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-amber-50 via-white to-amber-50 p-4">
       <div className="w-full max-w-md">
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-8 text-center"
-        >
-          <h1 className="text-3xl font-bold text-primary">Restaurant Admin</h1>
-          <p className="mt-2 text-muted-foreground">Boshqaruv paneliga kirish</p>
-        </motion.div>
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -166,7 +157,7 @@ export function AdminLogin() {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="admin@example.com"
+                      placeholder=""
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       disabled={isLoading}

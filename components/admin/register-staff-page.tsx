@@ -3,17 +3,17 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth"
-import { doc, setDoc, collection, getDocs, deleteDoc, updateDoc } from "firebase/firestore"
+import { collection, query, where, getDocs, doc, setDoc, deleteDoc } from "firebase/firestore"
+import { createUserWithEmailAndPassword } from "firebase/auth"
 import { auth, db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
-import { ChefHat, User, Trash2, Edit, Check, X, Search } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,72 +23,38 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Loader2, UserPlus, Trash2, Edit, Search, UserCheck, UserX } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { User as UserType } from "@/types"
 
 export function RegisterStaffPage() {
-  const [chefData, setChefData] = useState({
-    name: "",
-    email: "",
-    password: "",
-  })
-
-  const [waiterData, setWaiterData] = useState({
-    name: "",
-    email: "",
-    password: "",
-  })
-
-  const [staffList, setStaffList] = useState<UserType[]>([])
-  const [filteredStaff, setFilteredStaff] = useState<UserType[]>([])
-  const [isSubmittingChef, setIsSubmittingChef] = useState(false)
-  const [isSubmittingWaiter, setIsSubmittingWaiter] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState("register")
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [role, setRole] = useState("waiter")
+  const [isLoading, setIsLoading] = useState(false)
+  const [staffList, setStaffList] = useState<any[]>([])
+  const [isLoadingStaff, setIsLoadingStaff] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  const [roleFilter, setRoleFilter] = useState("all")
-  const [deletingStaffId, setDeletingStaffId] = useState<string | null>(null)
-  const [editingStaff, setEditingStaff] = useState<UserType | null>(null)
-  const [editedName, setEditedName] = useState("")
+  const [activeTab, setActiveTab] = useState("all")
+  const [editingStaff, setEditingStaff] = useState<any>(null)
   const { toast } = useToast()
 
   useEffect(() => {
     fetchStaffList()
   }, [])
 
-  useEffect(() => {
-    // Filter staff based on search query and role
-    let filtered = staffList
-
-    if (searchQuery) {
-      filtered = filtered.filter(
-        (staff) =>
-          staff.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          staff.email.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    }
-
-    if (roleFilter !== "all") {
-      filtered = filtered.filter((staff) => staff.role === roleFilter)
-    }
-
-    setFilteredStaff(filtered)
-  }, [searchQuery, roleFilter, staffList])
-
   const fetchStaffList = async () => {
+    setIsLoadingStaff(true)
     try {
-      setIsLoading(true)
-      const usersSnapshot = await getDocs(collection(db, "users"))
-      const usersData: UserType[] = []
-
-      usersSnapshot.forEach((doc) => {
-        usersData.push({ id: doc.id, ...doc.data() } as UserType)
-      })
-
-      setStaffList(usersData)
-      setFilteredStaff(usersData)
+      const staffQuery = query(collection(db, "users"), where("role", "!=", "customer"))
+      const staffSnapshot = await getDocs(staffQuery)
+      const staffData = staffSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      setStaffList(staffData)
     } catch (error) {
       console.error("Error fetching staff list:", error)
       toast({
@@ -97,153 +63,88 @@ export function RegisterStaffPage() {
         variant: "destructive",
       })
     } finally {
+      setIsLoadingStaff(false)
+    }
+  }
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      if (editingStaff) {
+        // Update existing staff
+        await setDoc(
+          doc(db, "users", editingStaff.id),
+          {
+            name,
+            email,
+            role,
+            updatedAt: new Date(),
+          },
+          { merge: true },
+        )
+
+        toast({
+          title: "Muvaffaqiyatli yangilandi",
+          description: "Xodim ma'lumotlari muvaffaqiyatli yangilandi",
+        })
+
+        setEditingStaff(null)
+      } else {
+        // Check if email already exists
+        const emailQuery = query(collection(db, "users"), where("email", "==", email))
+        const emailSnapshot = await getDocs(emailQuery)
+
+        if (!emailSnapshot.empty) {
+          throw new Error("Bu email allaqachon ro'yxatdan o'tgan")
+        }
+
+        // Create new user
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+        const user = userCredential.user
+
+        // Save user data to Firestore
+        await setDoc(doc(db, "users", user.uid), {
+          name,
+          email,
+          role,
+          createdAt: new Date(),
+        })
+
+        toast({
+          title: "Muvaffaqiyatli ro'yxatdan o'tkazildi",
+          description: "Yangi xodim muvaffaqiyatli ro'yxatdan o'tkazildi",
+        })
+      }
+
+      // Reset form
+      setName("")
+      setEmail("")
+      setPassword("")
+      setRole("waiter")
+
+      // Refresh staff list
+      fetchStaffList()
+    } catch (error: any) {
+      console.error("Error registering staff:", error)
+      toast({
+        title: "Xatolik",
+        description: error.message || "Xodimni ro'yxatdan o'tkazishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
       setIsLoading(false)
     }
   }
 
-  const handleChefChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setChefData((prev) => ({ ...prev, [name]: value }))
-  }
-
-  const handleWaiterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setWaiterData((prev) => ({ ...prev, [name]: value }))
-  }
-
-  const registerChef = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!chefData.name || !chefData.email || !chefData.password) {
-      toast({
-        title: "Xatolik",
-        description: "Barcha maydonlarni to'ldiring",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmittingChef(true)
-
+  const handleDeleteStaff = async (staffId: string) => {
     try {
-      // Create user with email and password
-      const userCredential = await createUserWithEmailAndPassword(auth, chefData.email, chefData.password)
-
-      // Update profile with name
-      await updateProfile(userCredential.user, {
-        displayName: chefData.name,
-      })
-
-      // Add user to Firestore with role
-      await setDoc(doc(db, "users", userCredential.user.uid), {
-        name: chefData.name,
-        email: chefData.email,
-        role: "chef",
-        createdAt: new Date(),
-      })
-
+      await deleteDoc(doc(db, "users", staffId))
       toast({
-        title: "Muvaffaqiyatli",
-        description: "Oshpaz ro'yxatga olindi",
+        title: "Muvaffaqiyatli o'chirildi",
+        description: "Xodim muvaffaqiyatli o'chirildi",
       })
-
-      // Reset form
-      setChefData({
-        name: "",
-        email: "",
-        password: "",
-      })
-
-      // Refresh staff list
-      fetchStaffList()
-
-      // Switch to staff list tab
-      setActiveTab("staff-list")
-    } catch (error: any) {
-      console.error("Error registering chef:", error)
-      toast({
-        title: "Xatolik",
-        description: error.message || "Oshpazni ro'yxatga olishda xatolik yuz berdi",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmittingChef(false)
-    }
-  }
-
-  const registerWaiter = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!waiterData.name || !waiterData.email || !waiterData.password) {
-      toast({
-        title: "Xatolik",
-        description: "Barcha maydonlarni to'ldiring",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmittingWaiter(true)
-
-    try {
-      // Create user with email and password
-      const userCredential = await createUserWithEmailAndPassword(auth, waiterData.email, waiterData.password)
-
-      // Update profile with name
-      await updateProfile(userCredential.user, {
-        displayName: waiterData.name,
-      })
-
-      // Add user to Firestore with role
-      await setDoc(doc(db, "users", userCredential.user.uid), {
-        name: waiterData.name,
-        email: waiterData.email,
-        role: "waiter",
-        createdAt: new Date(),
-      })
-
-      toast({
-        title: "Muvaffaqiyatli",
-        description: "Ofitsiant ro'yxatga olindi",
-      })
-
-      // Reset form
-      setWaiterData({
-        name: "",
-        email: "",
-        password: "",
-      })
-
-      // Refresh staff list
-      fetchStaffList()
-
-      // Switch to staff list tab
-      setActiveTab("staff-list")
-    } catch (error: any) {
-      console.error("Error registering waiter:", error)
-      toast({
-        title: "Xatolik",
-        description: error.message || "Ofitsiantni ro'yxatga olishda xatolik yuz berdi",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmittingWaiter(false)
-    }
-  }
-
-  const handleDeleteStaff = async () => {
-    if (!deletingStaffId) return
-
-    try {
-      // Delete user from Firestore
-      await deleteDoc(doc(db, "users", deletingStaffId))
-
-      toast({
-        title: "Muvaffaqiyatli",
-        description: "Xodim o'chirildi",
-      })
-
-      // Refresh staff list
       fetchStaffList()
     } catch (error) {
       console.error("Error deleting staff:", error)
@@ -252,311 +153,284 @@ export function RegisterStaffPage() {
         description: "Xodimni o'chirishda xatolik yuz berdi",
         variant: "destructive",
       })
-    } finally {
-      setDeletingStaffId(null)
     }
   }
 
-  const handleEditStaff = (staff: UserType) => {
+  const handleEditStaff = (staff: any) => {
     setEditingStaff(staff)
-    setEditedName(staff.name)
+    setName(staff.name || "")
+    setEmail(staff.email || "")
+    setRole(staff.role || "waiter")
+    // Don't set password as we don't want to change it
   }
 
-  const handleSaveEdit = async () => {
-    if (!editingStaff || !editedName.trim()) return
+  const cancelEdit = () => {
+    setEditingStaff(null)
+    setName("")
+    setEmail("")
+    setPassword("")
+    setRole("waiter")
+  }
 
-    try {
-      // Update user in Firestore
-      await updateDoc(doc(db, "users", editingStaff.id), {
-        name: editedName.trim(),
-      })
-
-      toast({
-        title: "Muvaffaqiyatli",
-        description: "Xodim ma'lumotlari yangilandi",
-      })
-
-      // Refresh staff list
-      fetchStaffList()
-
-      // Reset editing state
-      setEditingStaff(null)
-      setEditedName("")
-    } catch (error) {
-      console.error("Error updating staff:", error)
-      toast({
-        title: "Xatolik",
-        description: "Xodim ma'lumotlarini yangilashda xatolik yuz berdi",
-        variant: "destructive",
-      })
+  const filteredStaff = staffList.filter((staff) => {
+    // Filter by tab
+    if (activeTab !== "all" && staff.role !== activeTab) {
+      return false
     }
-  }
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      return (
+        (staff.name && staff.name.toLowerCase().includes(query)) ||
+        (staff.email && staff.email.toLowerCase().includes(query))
+      )
+    }
+
+    return true
+  })
 
   const getRoleBadge = (role: string) => {
     switch (role) {
       case "admin":
-        return <Badge className="bg-blue-500">Admin</Badge>
+        return (
+          <Badge variant="outline" className="bg-purple-50 text-purple-600">
+            <UserCheck className="mr-1 h-3 w-3" />
+            Admin
+          </Badge>
+        )
       case "chef":
-        return <Badge className="bg-green-500">Oshpaz</Badge>
+      case "oshpaz":
+        return (
+          <Badge variant="outline" className="bg-orange-50 text-orange-600">
+            Oshpaz
+          </Badge>
+        )
       case "waiter":
-        return <Badge className="bg-amber-500">Ofitsiant</Badge>
+      case "ofitsiant":
+        return (
+          <Badge variant="outline" className="bg-blue-50 text-blue-600">
+            Ofitsiant
+          </Badge>
+        )
       default:
-        return <Badge>{role}</Badge>
+        return (
+          <Badge variant="outline" className="bg-gray-50 text-gray-600">
+            {role}
+          </Badge>
+        )
     }
-  }
-
-  const countStaffByRole = (role: string) => {
-    return staffList.filter((staff) => staff.role === role).length
   }
 
   return (
     <AdminLayout>
-      <div className="p-6">
-        <h1 className="mb-6 text-2xl font-bold">Xodimlarni boshqarish</h1>
+      <div className="container mx-auto p-4 md:p-6">
+        <h1 className="mb-6 text-2xl font-bold">Xodimlarni ro'yxatdan o'tkazish</h1>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6">
-            <TabsTrigger value="register">Ro'yxatga olish</TabsTrigger>
-            <TabsTrigger value="staff-list">
-              Xodimlar ro'yxati
-              <Badge variant="secondary" className="ml-2">
-                {staffList.length}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="register">
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <ChefHat className="h-5 w-5" />
-                    Oshpazni ro'yxatga olish
-                  </CardTitle>
-                  <CardDescription>
-                    Yangi oshpaz uchun hisob yarating. Oshpaz ushbu ma'lumotlar bilan tizimga kirishi mumkin.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={registerChef} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="chef-name">Ism</Label>
-                      <Input
-                        id="chef-name"
-                        name="name"
-                        value={chefData.name}
-                        onChange={handleChefChange}
-                        placeholder="Oshpazning to'liq ismi"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="chef-email">Email</Label>
-                      <Input
-                        id="chef-email"
-                        name="email"
-                        type="email"
-                        value={chefData.email}
-                        onChange={handleChefChange}
-                        placeholder="oshpaz@restoran.com"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="chef-password">Parol</Label>
-                      <Input
-                        id="chef-password"
-                        name="password"
-                        type="password"
-                        value={chefData.password}
-                        onChange={handleChefChange}
-                        placeholder="Kamida 6 ta belgi"
-                        required
-                        minLength={6}
-                      />
-                    </div>
-
-                    <Button type="submit" className="w-full" disabled={isSubmittingChef}>
-                      {isSubmittingChef ? "Ro'yxatga olinmoqda..." : "Ro'yxatga olish"}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="h-5 w-5" />
-                    Ofitsiantni ro'yxatga olish
-                  </CardTitle>
-                  <CardDescription>
-                    Yangi ofitsiant uchun hisob yarating. Ofitsiant ushbu ma'lumotlar bilan tizimga kirishi mumkin.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={registerWaiter} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="waiter-name">Ism</Label>
-                      <Input
-                        id="waiter-name"
-                        name="name"
-                        value={waiterData.name}
-                        onChange={handleWaiterChange}
-                        placeholder="Ofitsiantning to'liq ismi"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="waiter-email">Email</Label>
-                      <Input
-                        id="waiter-email"
-                        name="email"
-                        type="email"
-                        value={waiterData.email}
-                        onChange={handleWaiterChange}
-                        placeholder="ofitsiant@restoran.com"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="waiter-password">Parol</Label>
-                      <Input
-                        id="waiter-password"
-                        name="password"
-                        type="password"
-                        value={waiterData.password}
-                        onChange={handleWaiterChange}
-                        placeholder="Kamida 6 ta belgi"
-                        required
-                        minLength={6}
-                      />
-                    </div>
-
-                    <Button type="submit" className="w-full" disabled={isSubmittingWaiter}>
-                      {isSubmittingWaiter ? "Ro'yxatga olinmoqda..." : "Ro'yxatga olish"}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="staff-list">
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="md:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle>Xodimlar ro'yxati</CardTitle>
+                <CardTitle>{editingStaff ? "Xodimni tahrirlash" : "Yangi xodim qo'shish"}</CardTitle>
                 <CardDescription>
-                  Jami {staffList.length} ta xodim: {countStaffByRole("admin")} ta admin, {countStaffByRole("chef")} ta
-                  oshpaz, {countStaffByRole("waiter")} ta ofitsiant
+                  {editingStaff
+                    ? "Xodim ma'lumotlarini yangilang"
+                    : "Yangi xodimni tizimga qo'shish uchun ma'lumotlarni kiriting"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="mb-6 grid gap-4 md:grid-cols-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Ism</Label>
                     <Input
-                      placeholder="Xodimlarni qidirish..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
+                      id="name"
+                      placeholder="Xodim ismi"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
                     />
                   </div>
-                  <Select value={roleFilter} onValueChange={setRoleFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Barcha xodimlar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Barcha xodimlar</SelectItem>
-                      <SelectItem value="admin">Adminlar</SelectItem>
-                      <SelectItem value="chef">Oshpazlar</SelectItem>
-                      <SelectItem value="waiter">Ofitsiantlar</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
 
-                {isLoading ? (
-                  <div className="py-8 text-center">Xodimlar ro'yxati yuklanmoqda...</div>
-                ) : filteredStaff.length === 0 ? (
-                  <div className="py-8 text-center text-muted-foreground">Xodimlar topilmadi</div>
-                ) : (
                   <div className="space-y-2">
-                    {filteredStaff.map((staff) => (
-                      <div key={staff.id} className="flex items-center justify-between rounded-md border p-3">
-                        {editingStaff?.id === staff.id ? (
-                          <div className="flex flex-1 items-center gap-2">
-                            <Input
-                              value={editedName}
-                              onChange={(e) => setEditedName(e.target.value)}
-                              className="flex-1"
-                            />
-                            <Button size="sm" variant="ghost" onClick={handleSaveEdit}>
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setEditingStaff(null)}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <>
-                            <div>
-                              <div className="font-medium">{staff.name}</div>
-                              <div className="text-sm text-muted-foreground">{staff.email}</div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {getRoleBadge(staff.role)}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEditStaff(staff)}
-                                disabled={staff.role === "admin"}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive"
-                                onClick={() => setDeletingStaffId(staff.id)}
-                                disabled={staff.role === "admin"}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="xodim@restoran.uz"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      disabled={!!editingStaff}
+                    />
                   </div>
-                )}
+
+                  {!editingStaff && (
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Parol</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="********"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required={!editingStaff}
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="role">Lavozim</Label>
+                    <Select value={role} onValueChange={setRole} required>
+                      <SelectTrigger id="role">
+                        <SelectValue placeholder="Lavozimni tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="chef">Oshpaz</SelectItem>
+                        <SelectItem value="waiter">Ofitsiant</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          {editingStaff ? "Yangilanmoqda..." : "Ro'yxatdan o'tkazilmoqda..."}
+                        </>
+                      ) : (
+                        <>
+                          {editingStaff ? (
+                            <>
+                              <Edit className="mr-2 h-4 w-4" />
+                              Yangilash
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="mr-2 h-4 w-4" />
+                              Ro'yxatdan o'tkazish
+                            </>
+                          )}
+                        </>
+                      )}
+                    </Button>
+                    {editingStaff && (
+                      <Button type="button" variant="outline" onClick={cancelEdit}>
+                        Bekor qilish
+                      </Button>
+                    )}
+                  </div>
+                </form>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
 
-        {/* Delete Staff Confirmation Dialog */}
-        <AlertDialog open={!!deletingStaffId} onOpenChange={(open) => !open && setDeletingStaffId(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Xodimni o'chirishni tasdiqlaysizmi?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Bu amal qaytarib bo'lmaydi. Xodim tizimdan butunlay o'chiriladi.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Bekor qilish</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteStaff}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                O'chirish
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          <div className="md:col-span-2">
+            <Card className="h-full">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <CardTitle>Xodimlar ro'yxati</CardTitle>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Qidirish..."
+                      className="pl-8"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList className="mb-4 w-full">
+                    <TabsTrigger value="all" className="flex-1">
+                      Barchasi
+                    </TabsTrigger>
+                    <TabsTrigger value="admin" className="flex-1">
+                      Adminlar
+                    </TabsTrigger>
+                    <TabsTrigger value="chef" className="flex-1">
+                      Oshpazlar
+                    </TabsTrigger>
+                    <TabsTrigger value="waiter" className="flex-1">
+                      Ofitsiantlar
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value={activeTab} className="mt-0">
+                    {isLoadingStaff ? (
+                      <div className="flex h-40 items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      </div>
+                    ) : filteredStaff.length > 0 ? (
+                      <div className="space-y-4">
+                        {filteredStaff.map((staff) => (
+                          <div
+                            key={staff.id}
+                            className="flex flex-col justify-between gap-2 rounded-lg border p-4 sm:flex-row sm:items-center"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-medium">{staff.name}</h3>
+                                {getRoleBadge(staff.role)}
+                              </div>
+                              <p className="text-sm text-muted-foreground">{staff.email}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleEditStaff(staff)}
+                                disabled={isLoading}
+                              >
+                                <Edit className="mr-2 h-4 w-4" />
+                                Tahrirlash
+                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="destructive" size="sm" disabled={isLoading}>
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    O'chirish
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Xodimni o'chirish</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Haqiqatan ham bu xodimni o'chirmoqchimisiz? Bu amalni ortga qaytarib bo'lmaydi.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Bekor qilish</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteStaff(staff.id)}>
+                                      O'chirish
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
+                        <UserX className="mb-2 h-8 w-8 text-muted-foreground" />
+                        <p className="text-muted-foreground">Xodimlar topilmadi</p>
+                        <p className="text-sm text-muted-foreground">
+                          {searchQuery
+                            ? "Qidiruv bo'yicha xodimlar topilmadi"
+                            : "Hozircha bu turdagi xodimlar mavjud emas"}
+                        </p>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </AdminLayout>
   )

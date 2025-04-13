@@ -11,14 +11,11 @@ import { onAuthStateChanged } from "firebase/auth"
 import {
   LayoutDashboard,
   Utensils,
-  BarChart,
   ChefHat,
   User,
   UserPlus,
   Table,
   LogOut,
-  MenuIcon,
-  X,
   Settings,
   BarChart3,
   History,
@@ -36,6 +33,8 @@ type SidebarContextType = {
   toggleMobileMenu: () => void
   userRole: string | null
   userName: string | null
+  expanded: boolean
+  toggleSidebar: () => void
 }
 
 const SidebarContext = createContext<SidebarContextType>({
@@ -43,6 +42,8 @@ const SidebarContext = createContext<SidebarContextType>({
   toggleMobileMenu: () => {},
   userRole: null,
   userName: null,
+  expanded: true,
+  toggleSidebar: () => {},
 })
 
 export const useSidebar = () => useContext(SidebarContext)
@@ -51,6 +52,7 @@ export function AdminSidebarProvider({ children }: { children: React.ReactNode }
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userName, setUserName] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -78,6 +80,10 @@ export function AdminSidebarProvider({ children }: { children: React.ReactNode }
     setIsMobileMenuOpen(!isMobileMenuOpen)
   }
 
+  const toggleSidebar = () => {
+    setExpanded(!expanded)
+  }
+
   return (
     <SidebarContext.Provider
       value={{
@@ -85,41 +91,14 @@ export function AdminSidebarProvider({ children }: { children: React.ReactNode }
         toggleMobileMenu,
         userRole,
         userName,
+        expanded,
+        toggleSidebar,
       }}
     >
       {children}
     </SidebarContext.Provider>
   )
 }
-
-// Navigation link component with memoization
-const NavLink = memo(
-  ({
-    href,
-    isActive,
-    icon: Icon,
-    label,
-    onClick,
-  }: {
-    href: string
-    isActive: boolean
-    icon: React.ElementType
-    label: string
-    onClick?: () => void
-  }) => (
-    <Link
-      href={href}
-      className={`mb-1 flex items-center rounded-md px-3 py-2 transition-colors ${
-        isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
-      }`}
-      onClick={onClick}
-    >
-      <Icon className="mr-2 h-4 w-4" />
-      {label}
-    </Link>
-  ),
-)
-NavLink.displayName = "NavLink"
 
 const adminRoutes = [
   {
@@ -171,14 +150,10 @@ const adminRoutes = [
 
 // Memoized sidebar component
 export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) => {
-  const { isMobileMenuOpen, toggleMobileMenu, userRole, userName } = useSidebar()
+  const { isMobileMenuOpen, toggleMobileMenu, userRole, userName, expanded } = useSidebar()
   const pathname = usePathname()
   const router = useRouter()
   const { toast } = useToast()
-
-  const isActive = (path: string) => {
-    return pathname === path
-  }
 
   const handleLogout = async () => {
     try {
@@ -198,219 +173,102 @@ export const AdminSidebar = memo(({ children }: { children: React.ReactNode }) =
     }
   }
 
-  // Render different navigation links based on user role
-  const renderNavLinks = (isMobile = false) => {
-    const onClick = isMobile ? toggleMobileMenu : undefined
-
-    // Admin sees all pages
-    if (userRole === "admin") {
-      return (
-        <>
-          <NavLink
-            href="/admin/dashboard"
-            isActive={isActive("/admin/dashboard")}
-            icon={LayoutDashboard}
-            label="Boshqaruv paneli"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/menu"
-            isActive={isActive("/admin/menu")}
-            icon={Utensils}
-            label="Menyu boshqaruvi"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/tables"
-            isActive={isActive("/admin/tables")}
-            icon={Table}
-            label="Stollar boshqaruvi"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/stats"
-            isActive={isActive("/admin/stats")}
-            icon={BarChart}
-            label="Statistika"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/settings"
-            isActive={isActive("/admin/settings")}
-            icon={Settings}
-            label="Sozlamalar"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/register-staff"
-            isActive={isActive("/admin/register-staff")}
-            icon={UserPlus}
-            label="Xodimlarni boshqarish"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/chef"
-            isActive={isActive("/admin/chef")}
-            icon={ChefHat}
-            label="Oshpaz paneli"
-            onClick={onClick}
-          />
-          <NavLink
-            href="/admin/waiter"
-            isActive={isActive("/admin/waiter")}
-            icon={User}
-            label="Ofitsiant paneli"
-            onClick={onClick}
-          />
-        </>
-      )
-    }
-
-    // Chef/Oshpaz only sees chef page
-    if (userRole === "chef" || userRole === "oshpaz") {
-      return (
-        <NavLink
-          href="/admin/chef"
-          isActive={isActive("/admin/chef")}
-          icon={ChefHat}
-          label="Oshpaz paneli"
-          onClick={onClick}
-        />
-      )
-    }
-
-    // Waiter/Ofitsiant only sees waiter page
-    if (userRole === "waiter" || userRole === "ofitsiant") {
-      return (
-        <NavLink
-          href="/admin/waiter"
-          isActive={isActive("/admin/waiter")}
-          icon={User}
-          label="Ofitsiant paneli"
-          onClick={onClick}
-        />
-      )
-    }
-
-    return null
-  }
-
   // If no user is logged in or role is not determined yet, don't show sidebar
   if (!userRole) {
     return <div className="min-h-screen">{children}</div>
   }
 
-  // If user is chef or waiter, show a simplified header
+  // If user is chef or waiter, show a simplified layout without sidebar
   if (userRole === "chef" || userRole === "oshpaz" || userRole === "waiter" || userRole === "ofitsiant") {
     return (
-      <div className="flex h-screen flex-col">
-        <header className="fixed top-0 z-30 flex h-16 w-full items-center justify-between border-b bg-white px-6">
-          <div className="font-semibold">
-            {userRole === "chef" || userRole === "oshpaz"
-              ? "Oshpaz Panel"
-              : userRole === "waiter" || userRole === "ofitsiant"
-                ? "Ofitsiant Panel"
-                : "Restaurant Admin"}
-          </div>
-          <div className="flex items-center gap-4">
-            {userName && <span className="text-sm text-muted-foreground">{userName}</span>}
-            <Button variant="ghost" size="sm" onClick={handleLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Chiqish
-            </Button>
-          </div>
-        </header>
-        <div className="mt-16 flex-1 overflow-auto p-6">{children}</div>
+      <div className="flex-1 p-6">
+        {children}
+        <Button variant="outline" size="sm" className="fixed bottom-4 right-4 shadow-md" onClick={handleLogout}>
+          <LogOut className="mr-2 h-4 w-4" />
+          Chiqish
+        </Button>
       </div>
     )
   }
 
-  // Admin gets full sidebar and header
+  // Admin gets full sidebar
   return (
-    <div className="flex h-screen flex-col">
-      {/* Header for admin */}
-      <header className="fixed top-0 z-30 flex h-16 w-full items-center justify-between border-b bg-white px-6">
-        <div className="flex items-center">
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={toggleMobileMenu}>
-            {isMobileMenuOpen ? <X /> : <MenuIcon />}
-          </Button>
-          <div className="font-semibold">Admin Panel</div>
-        </div>
-        <div className="flex items-center gap-4">
-          {userName && <span className="hidden text-sm text-muted-foreground md:inline-block">{userName}</span>}
-          <Button variant="ghost" size="sm" onClick={handleLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Chiqish
-          </Button>
-        </div>
-      </header>
-
-      <div className="mt-16 flex flex-1">
-        {/* Desktop sidebar for admin - FIXED */}
-        <aside className="fixed top-16 bottom-0 left-0 z-20 hidden h-[calc(100vh-4rem)] w-64 overflow-y-auto border-r bg-white md:block">
-          <div className="flex h-full flex-col justify-between p-4">
-            {/* <nav className="flex flex-col">{renderNavLinks()}</nav> */}
-            <div className="flex h-full w-56 flex-col  bg-white">
-
-              <div className="flex-1 py-2">
-                <nav className="grid items-start px-2 text-sm">
-                  {adminRoutes.map((route, index) => (
-                    <Link
-                      key={index}
-                      href={route.href}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-foreground",
-                        pathname === route.href && "bg-muted text-foreground",
-                      )}
-                    >
-                      <route.icon className="h-4 w-4" />
-                      <span>{route.title}</span>
-                    </Link>
-                  ))}
-                </nav>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        {/* Main content area with left margin for sidebar */}
-        <main className="w-full  p-6 md:ml-64">{children}</main>
-
-        {/* Mobile sidebar for admin */}
-        {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={toggleMobileMenu}>
-            <div
-              className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-64 overflow-y-auto bg-white p-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex h-full flex-col justify-between">
-                {/* <nav className="flex flex-col">{renderNavLinks(true)}</nav> */}
-                <div className="flex h-full w-52 flex-col  bg-white">
-
-                  <div className="flex-1  py-2">
-                    <nav className="grid items-start px-2 text-sm">
-                      {adminRoutes.map((route, index) => (
-                        <Link
-                          key={index}
-                          href={route.href}
-                          className={cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-foreground",
-                            pathname === route.href && "bg-muted text-foreground",
-                          )}
-                        >
-                          <route.icon className="h-4 w-4" />
-                          <span>{route.title}</span>
-                        </Link>
-                      ))}
-                    </nav>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+    <>
+      {/* Desktop sidebar */}
+      <aside
+        className={cn(
+          "fixed left-0 top-16 z-40 h-[calc(100vh-4rem)] border-r bg-white shadow-sm transition-all duration-300 ease-in-out",
+          expanded ? "w-64" : "w-20",
+          "hidden md:block",
         )}
-      </div>
-    </div>
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex-1 overflow-y-auto py-4">
+            <nav className="grid gap-1 px-2">
+              {adminRoutes.map((route, index) => (
+                <Link
+                  key={index}
+                  href={route.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground",
+                    pathname === route.href && "bg-muted text-foreground",
+                    !expanded && "justify-center px-0",
+                  )}
+                  title={!expanded ? route.title : undefined}
+                >
+                  <route.icon className="h-5 w-5" />
+                  {expanded && <span>{route.title}</span>}
+                </Link>
+              ))}
+            </nav>
+          </div>
+          <div className="border-t p-4">
+            <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              {expanded && "Chiqish"}
+            </Button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile sidebar overlay */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={toggleMobileMenu}>
+          <aside
+            className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-64 overflow-y-auto bg-white p-4 shadow-lg transition-transform duration-300 ease-in-out"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <nav className="grid gap-1">
+              {adminRoutes.map((route, index) => (
+                <Link
+                  key={index}
+                  href={route.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground",
+                    pathname === route.href && "bg-muted text-foreground",
+                  )}
+                  onClick={toggleMobileMenu}
+                >
+                  <route.icon className="h-5 w-5" />
+                  <span>{route.title}</span>
+                </Link>
+              ))}
+            </nav>
+            <div className="mt-4 border-t pt-4">
+              <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Chiqish
+              </Button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Main content */}
+      <main className={cn("flex-1 p-6 transition-all pt-16 duration-300 ease-in-out", expanded ? "md:ml-64" : "md:ml-20")}>
+        {children}
+      </main>
+    </>
   )
 })
 AdminSidebar.displayName = "AdminSidebar"
