@@ -18,8 +18,6 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder, onDeleteOrde
         return "bg-yellow-500 text-white"
       case "preparing":
         return "bg-blue-500 text-white"
-      case "ready":
-        return "bg-green-500 text-white"
       case "completed":
         return "bg-gray-500 text-white"
       default:
@@ -33,8 +31,6 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder, onDeleteOrde
         return "Kutilmoqda"
       case "preparing":
         return "Tayyorlanmoqda"
-      case "ready":
-        return "Tayyor"
       case "completed":
         return "Yakunlangan"
       default:
@@ -95,18 +91,14 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder, onDeleteOrde
                     ? "bg-yellow-100 text-yellow-800"
                     : order.status === "preparing"
                       ? "bg-blue-100 text-blue-800"
-                      : order.status === "ready"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-800"
+                      : "bg-gray-100 text-gray-800"
                 }`}
               >
                 {order.status === "pending"
                   ? "Kutilmoqda"
                   : order.status === "preparing"
                     ? "Tayyorlanmoqda"
-                    : order.status === "ready"
-                      ? "Tayyor"
-                      : "Yakunlangan"}
+                    : "Yakunlangan"}
               </div>
             </div>
             <div className="font-medium">{formatCurrency(order.total)}</div>

@@ -137,7 +137,7 @@ export function MenuPage() {
               />
             </div>
           </div>
-          <div className="fixed bottom-16  right-4 z-50">
+          <div className="fixed bottom-16 pb-10 right-4 z-50">
             <CartButton />
           </div>
         </>

@@ -37,9 +37,6 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
         case "preparing":
           soundFile = "/cooking.mp3"
           break
-        case "ready":
-          soundFile = "/ready.mp3"
-          break
         case "completed":
           soundFile = "/success.mp3"
           break
@@ -82,8 +79,6 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
         return "Kutilmoqda"
       case "preparing":
         return "Tayyorlanmoqda"
-      case "ready":
-        return "Tayyor"
       case "completed":
         return "Yakunlangan"
       default:
@@ -199,15 +194,6 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
             >
               {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Tayyorlanmoqda
-            </Button>
-            <Button
-              variant={order.status === "ready" ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleUpdateStatus("ready")}
-              disabled={isUpdating || order.status === "ready"}
-            >
-              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Tayyor
             </Button>
             <Button
               variant={order.status === "completed" ? "default" : "outline"}

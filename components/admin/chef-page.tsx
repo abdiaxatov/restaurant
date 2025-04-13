@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from "firebase/firestore"
+import { useState, useEffect, useRef } from "react"
+import { doc, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,74 +9,118 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LoadingSpinner } from "@/components/admin/loading-spinner"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle2 } from "lucide-react"
+import { Clock, CheckCircle2, History, Bell, BellOff } from "lucide-react"
 import type { Order } from "@/types"
+import { getDocs } from "@/lib/getDocs"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 
 export function ChefPage() {
   const [pendingOrders, setPendingOrders] = useState<Order[]>([])
-  const [cookingOrders, setCookingOrders] = useState<Order[]>([])
-  const [readyOrders, setReadyOrders] = useState<Order[]>([])
+  const [preparingOrders, setPreparingOrders] = useState<Order[]>([])
+  const [completedOrders, setCompletedOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const notificationAudioRef = useRef<HTMLAudioElement | null>(null)
+  const previousPendingCountRef = useRef(0)
 
-  useEffect(() => {
-    const ordersQuery = query(
-      collection(db, "orders"),
-      where("status", "in", ["pending", "cooking", "ready"]),
-      orderBy("createdAt", "asc"),
-    )
+  // Function to fetch orders
+  const fetchOrders = async () => {
+    try {
+      // Get pending orders
+      const pendingOrdersData = await getDocs("orders", [["status", "==", "pending"]])
 
-    const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      const pendingOrdersData: Order[] = []
-      const cookingOrdersData: Order[] = []
-      const readyOrdersData: Order[] = []
-
-      snapshot.forEach((doc) => {
-        const orderData = { id: doc.id, ...doc.data() } as Order
-
-        if (orderData.status === "pending") {
-          pendingOrdersData.push(orderData)
-        } else if (orderData.status === "cooking") {
-          cookingOrdersData.push(orderData)
-        } else if (orderData.status === "ready") {
-          readyOrdersData.push(orderData)
-        }
-      })
+      // Check for new orders and play notification if needed
+      if (pendingOrdersData.length > previousPendingCountRef.current && soundEnabled) {
+        notificationAudioRef.current?.play().catch((e) => console.error("Error playing notification:", e))
+      }
+      previousPendingCountRef.current = pendingOrdersData.length
 
       setPendingOrders(pendingOrdersData)
-      setCookingOrders(cookingOrdersData)
-      setReadyOrders(readyOrdersData)
-      setIsLoading(false)
-    })
 
-    return () => unsubscribe()
+      // Get preparing orders
+      const preparingOrdersData = await getDocs("orders", [["status", "==", "preparing"]])
+      setPreparingOrders(preparingOrdersData)
+
+      // Get completed orders (limit to last 20 for performance)
+      const completedOrdersData = await getDocs("orders", [["status", "==", "completed"]])
+      setCompletedOrders(completedOrdersData.slice(0, 20)) // Limit to last 20 orders
+
+      setIsLoading(false)
+    } catch (error) {
+      console.error("Error fetching orders:", error)
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    // Initialize audio elements
+    audioRef.current = new Audio("/cooking.mp3")
+    notificationAudioRef.current = new Audio("/notification.mp3")
+
+    // Initial fetch
+    fetchOrders()
+
+    // Set up a simple interval to refresh data every 3 seconds
+    const intervalId = setInterval(() => {
+      fetchOrders()
+    }, 3000)
+
+    return () => {
+      clearInterval(intervalId)
+    }
   }, [])
 
-  const handleStartCooking = async (orderId: string) => {
+  const handleStartPreparing = async (orderId: string) => {
     try {
       await updateDoc(doc(db, "orders", orderId), {
-        status: "cooking",
+        status: "preparing",
+        updatedAt: new Date(),
       })
 
-      // Play cooking sound
-      const audio = new Audio("/cooking.mp3")
-      audio.play().catch((e) => console.error("Error playing sound:", e))
+      // Play cooking sound if enabled
+      if (soundEnabled) {
+        audioRef.current?.play().catch((e) => console.error("Error playing sound:", e))
+      }
+
+      // Refresh orders after update
+      fetchOrders()
     } catch (error) {
       console.error("Error updating order status:", error)
     }
   }
 
-  const handleOrderReady = async (orderId: string) => {
+  const handleOrderDelivered = async (orderId: string) => {
     try {
       await updateDoc(doc(db, "orders", orderId), {
-        status: "ready",
+        status: "completed",
+        updatedAt: new Date(),
       })
 
-      // Play ready sound
-      const audio = new Audio("/ready.mp3")
-      audio.play().catch((e) => console.error("Error playing sound:", e))
+      // Play ready sound if enabled
+      if (soundEnabled) {
+        const audio = new Audio("/ready.mp3")
+        audio.play().catch((e) => console.error("Error playing sound:", e))
+      }
+
+      // Refresh orders after update
+      fetchOrders()
     } catch (error) {
       console.error("Error updating order status:", error)
     }
+  }
+
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return ""
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleString("uz-UZ", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
   }
 
   if (isLoading) {
@@ -89,21 +133,26 @@ export function ChefPage() {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="mb-6 text-2xl font-bold">Oshxona</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Oshxona</h1>
+        <div className="flex items-center gap-2">
+          {soundEnabled ? <Bell className="h-5 w-5 text-green-600" /> : <BellOff className="h-5 w-5 text-gray-400" />}
+          <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} id="sound-mode" />
+          <Label htmlFor="sound-mode" className="text-sm">
+            Ovozli bildirishnoma
+          </Label>
+        </div>
+      </div>
 
       <Tabs defaultValue="pending">
-        <TabsList className="mb-4 grid w-full grid-cols-3">
+        <TabsList className="mb-4 grid w-full grid-cols-2">
           <TabsTrigger value="pending" className="relative">
             Yangi
             {pendingOrders.length > 0 && <Badge className="ml-2 bg-primary">{pendingOrders.length}</Badge>}
           </TabsTrigger>
-          <TabsTrigger value="cooking" className="relative">
-            Tayyorlanmoqda
-            {cookingOrders.length > 0 && <Badge className="ml-2 bg-amber-500">{cookingOrders.length}</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="ready" className="relative">
-            Tayyor
-            {readyOrders.length > 0 && <Badge className="ml-2 bg-green-500">{readyOrders.length}</Badge>}
+          <TabsTrigger value="history" className="relative">
+            <History className="mr-1 h-4 w-4" />
+            Tarix
           </TabsTrigger>
         </TabsList>
 
@@ -118,12 +167,19 @@ export function ChefPage() {
                 <Card key={order.id} className="overflow-hidden">
                   <CardHeader className="bg-muted/50 pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">Stol #{order.tableNumber}</CardTitle>
+                      <CardTitle className="text-base">
+                        {order.orderType === "table"
+                          ? order.roomNumber
+                            ? `Xona #${order.roomNumber}`
+                            : `Stol #${order.tableNumber}`
+                          : "Yetkazib berish"}
+                      </CardTitle>
                       <Badge variant="outline" className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         Yangi
                       </Badge>
                     </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>
                   <CardContent className="pt-4">
                     <ul className="space-y-1">
@@ -142,7 +198,7 @@ export function ChefPage() {
                     </div>
                   </CardContent>
                   <CardFooter className="bg-muted/30">
-                    <Button className="w-full" onClick={() => handleStartCooking(order.id)}>
+                    <Button className="w-full" onClick={() => handleStartPreparing(order.id)}>
                       Tayyorlashni boshlash
                     </Button>
                   </CardFooter>
@@ -152,22 +208,29 @@ export function ChefPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="cooking">
-          {cookingOrders.length === 0 ? (
+        <TabsContent value="preparing">
+          {preparingOrders.length === 0 ? (
             <div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
               <p className="text-muted-foreground">Tayyorlanayotgan buyurtmalar yo'q</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {cookingOrders.map((order) => (
+              {preparingOrders.map((order) => (
                 <Card key={order.id} className="overflow-hidden">
                   <CardHeader className="bg-amber-50 pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">Stol #{order.tableNumber}</CardTitle>
+                      <CardTitle className="text-base">
+                        {order.orderType === "table"
+                          ? order.roomNumber
+                            ? `Xona #${order.roomNumber}`
+                            : `Stol #${order.tableNumber}`
+                          : "Yetkazib berish"}
+                      </CardTitle>
                       <Badge variant="outline" className="bg-amber-100 text-amber-700">
                         Tayyorlanmoqda
                       </Badge>
                     </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>
                   <CardContent className="pt-4">
                     <ul className="space-y-1">
@@ -186,9 +249,9 @@ export function ChefPage() {
                     </div>
                   </CardContent>
                   <CardFooter className="bg-muted/30">
-                    <Button className="w-full" onClick={() => handleOrderReady(order.id)}>
+                    <Button className="w-full" onClick={() => handleOrderDelivered(order.id)}>
                       <CheckCircle2 className="mr-2 h-4 w-4" />
-                      Tayyor
+                      Yetkazildi
                     </Button>
                   </CardFooter>
                 </Card>
@@ -197,22 +260,29 @@ export function ChefPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="ready">
-          {readyOrders.length === 0 ? (
+        <TabsContent value="history">
+          {completedOrders.length === 0 ? (
             <div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
-              <p className="text-muted-foreground">Tayyor buyurtmalar yo'q</p>
+              <p className="text-muted-foreground">Yakunlangan buyurtmalar yo'q</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {readyOrders.map((order) => (
+              {completedOrders.map((order) => (
                 <Card key={order.id} className="overflow-hidden">
                   <CardHeader className="bg-green-50 pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">Stol #{order.tableNumber}</CardTitle>
+                      <CardTitle className="text-base">
+                        {order.orderType === "table"
+                          ? order.roomNumber
+                            ? `Xona #${order.roomNumber}`
+                            : `Stol #${order.tableNumber}`
+                          : "Yetkazib berish"}
+                      </CardTitle>
                       <Badge variant="outline" className="bg-green-100 text-green-700">
-                        Tayyor
+                        Yakunlangan
                       </Badge>
                     </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>
                   <CardContent className="pt-4">
                     <ul className="space-y-1">
@@ -228,6 +298,9 @@ export function ChefPage() {
                     <div className="mt-4 flex justify-between border-t pt-2">
                       <span className="font-medium">Jami:</span>
                       <span className="font-medium">{formatCurrency(order.total)}</span>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      <span className="font-medium">Yakunlangan vaqt:</span> {formatDate(order.updatedAt)}
                     </div>
                   </CardContent>
                 </Card>

@@ -7,6 +7,7 @@ export async function getDocs(collectionPath: string, whereConditions?: [string,
     let q = collection(db, collectionPath)
 
     if (whereConditions && whereConditions.length > 0) {
+      // Apply where conditions
       whereConditions.forEach((condition) => {
         q = query(q, where(condition[0], condition[1] as any, condition[2]))
       })
@@ -22,7 +23,12 @@ export async function getDocs(collectionPath: string, whereConditions?: [string,
       })
     })
 
-    return result
+    // Sort the results by createdAt in descending order (newest first)
+    return result.sort((a, b) => {
+      const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0)
+      const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0)
+      return dateB.getTime() - dateA.getTime()
+    })
   } catch (error) {
     console.error(`Error getting documents from ${collectionPath}:`, error)
     throw error
