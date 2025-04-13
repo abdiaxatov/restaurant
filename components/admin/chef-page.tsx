@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
+import { collection, query, where, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,14 +10,13 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, MapPin, Home, Loader2 } from "lucide-react"
+import { Clock, CheckCircle, MapPin, Home } from "lucide-react"
 import type { Order } from "@/types"
 
 export function ChefPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [activeTab, setActiveTab] = useState("pending")
   const [isLoading, setIsLoading] = useState(true)
-  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
@@ -27,11 +26,8 @@ export function ChefPage() {
     audioRef.current = new Audio("/notification.mp3")
 
     // Query orders that are pending or preparing (chef needs to see these)
-    const ordersQuery = query(
-      collection(db, "orders"),
-      where("status", "in", ["pending", "preparing"]),
-      orderBy("createdAt", "asc"),
-    )
+    // Note: We're not using orderBy to avoid index requirements
+    const ordersQuery = query(collection(db, "orders"), where("status", "in", ["pending", "preparing"]))
 
     const unsubscribe = onSnapshot(
       ordersQuery,
@@ -46,6 +42,14 @@ export function ChefPage() {
           }
           ordersList.push({ id: doc.id, ...data } as Order)
         })
+
+        // Sort orders by createdAt manually
+        ordersList.sort((a, b) => {
+          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt)
+          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt)
+          return dateA.getTime() - dateB.getTime()
+        })
+
         setOrders(ordersList)
         setIsLoading(false)
 
@@ -74,28 +78,10 @@ export function ChefPage() {
   const handleUpdateStatus = async (orderId: string | undefined, newStatus: string) => {
     if (!orderId) return
 
-    setProcessingOrderId(orderId)
-
     try {
-      const updatedAt = new Date()
-
-      // Update local state immediately for instant UI feedback
-      setOrders((prevOrders) =>
-        prevOrders.map((order) =>
-          order.id === orderId
-            ? {
-                ...order,
-                status: newStatus,
-                updatedAt: Timestamp.fromDate(updatedAt),
-              }
-            : order,
-        ),
-      )
-
-      // Then update in Firestore
       await updateDoc(doc(db, "orders", orderId), {
         status: newStatus,
-        updatedAt: updatedAt,
+        updatedAt: Timestamp.now(),
       })
 
       // Play sound for status change
@@ -106,24 +92,13 @@ export function ChefPage() {
         title: "Status yangilandi",
         description: `Buyurtma statusi ${newStatus === "preparing" ? "Tayyorlanmoqda" : "Tayyor"} ga o'zgartirildi.`,
       })
-
-      // If the status is "ready", switch to the "preparing" tab
-      if (newStatus === "ready") {
-        setActiveTab("preparing")
-      }
     } catch (error) {
       console.error("Error updating order status:", error)
-
-      // Revert the local state change if the update failed
-      setOrders((prevOrders) => [...prevOrders])
-
       toast({
         title: "Xatolik",
         description: "Buyurtma statusini yangilashda xatolik yuz berdi.",
         variant: "destructive",
       })
-    } finally {
-      setProcessingOrderId(null)
     }
   }
 
@@ -166,10 +141,7 @@ export function ChefPage() {
 
             <TabsContent value="pending" className="mt-0">
               {isLoading ? (
-                                      <div className="flex min-h-screen flex-col items-center justify-center">
-                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
-                                    </div>
+                <p>Buyurtmalar yuklanmoqda...</p>
               ) : pendingOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -217,19 +189,8 @@ export function ChefPage() {
                             </li>
                           ))}
                         </ul>
-                        <Button
-                          className="w-full bg-blue-500 hover:bg-blue-600"
-                          onClick={() => handleUpdateStatus(order.id, "preparing")}
-                          disabled={processingOrderId === order.id}
-                        >
-                          {processingOrderId === order.id ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Jarayonda...
-                            </>
-                          ) : (
-                            "Tayyorlashni boshlash"
-                          )}
+                        <Button className="w-full" onClick={() => handleUpdateStatus(order.id, "preparing")}>
+                          Tayyorlashni boshlash
                         </Button>
                       </CardContent>
                     </Card>
@@ -240,10 +201,7 @@ export function ChefPage() {
 
             <TabsContent value="preparing" className="mt-0">
               {isLoading ? (
-                                      <div className="flex min-h-screen flex-col items-center justify-center">
-                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
-                                    </div>
+                <p>Buyurtmalar yuklanmoqda...</p>
               ) : preparingOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -292,21 +250,12 @@ export function ChefPage() {
                           ))}
                         </ul>
                         <Button
-                          className="w-full bg-green-500 hover:bg-green-600"
+                          className="w-full"
+                          variant="default"
                           onClick={() => handleUpdateStatus(order.id, "ready")}
-                          disabled={processingOrderId === order.id}
                         >
-                          {processingOrderId === order.id ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Jarayonda...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="mr-2 h-4 w-4" />
-                              Tayyor
-                            </>
-                          )}
+                          <CheckCircle className="mr-2 h-4 w-4" />
+                          Tayyor
                         </Button>
                       </CardContent>
                     </Card>

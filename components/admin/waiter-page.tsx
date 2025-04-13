@@ -1,16 +1,27 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
+import { collection, query, where, deleteDoc, onSnapshot, doc, updateDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, MapPin, Home, Phone, Loader2 } from "lucide-react"
+import { Clock, CheckCircle, MapPin, Home, Phone, Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import type { Order } from "@/types"
 
 export function WaiterPage() {
@@ -27,11 +38,8 @@ export function WaiterPage() {
     audioRef.current = new Audio("/notification.mp3")
 
     // Query orders that are ready or completed (waiter needs to see these)
-    const ordersQuery = query(
-      collection(db, "orders"),
-      where("status", "in", ["ready", "completed"]),
-      orderBy("createdAt", "asc"),
-    )
+    // Note: We're not using orderBy to avoid index requirements
+    const ordersQuery = query(collection(db, "orders"), where("status", "in", ["ready", "completed"]))
 
     const unsubscribe = onSnapshot(
       ordersQuery,
@@ -46,6 +54,14 @@ export function WaiterPage() {
           }
           ordersList.push({ id: doc.id, ...data } as Order)
         })
+
+        // Sort orders by createdAt manually
+        ordersList.sort((a, b) => {
+          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt)
+          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt)
+          return dateA.getTime() - dateB.getTime()
+        })
+
         setOrders(ordersList)
         setIsLoading(false)
 
@@ -77,25 +93,9 @@ export function WaiterPage() {
     setProcessingOrderId(orderId)
 
     try {
-      const updatedAt = new Date()
-
-      // Update local state immediately for instant UI feedback
-      setOrders((prevOrders) =>
-        prevOrders.map((order) =>
-          order.id === orderId
-            ? {
-                ...order,
-                status: newStatus,
-                updatedAt: Timestamp.fromDate(updatedAt),
-              }
-            : order,
-        ),
-      )
-
-      // Then update in Firestore
       await updateDoc(doc(db, "orders", orderId), {
         status: newStatus,
-        updatedAt: updatedAt,
+        updatedAt: Timestamp.now(),
       })
 
       // Play sound for status change
@@ -106,20 +106,39 @@ export function WaiterPage() {
         title: "Status yangilandi",
         description: `Buyurtma statusi ${newStatus === "completed" ? "Yakunlangan" : newStatus} ga o'zgartirildi.`,
       })
-
-      // If the status is "completed", switch to the "completed" tab
-      if (newStatus === "completed") {
-        setActiveTab("completed")
-      }
     } catch (error) {
       console.error("Error updating order status:", error)
-
-      // Revert the local state change if the update failed
-      setOrders((prevOrders) => [...prevOrders])
-
       toast({
         title: "Xatolik",
         description: "Buyurtma statusini yangilashda xatolik yuz berdi.",
+        variant: "destructive",
+      })
+    } finally {
+      setProcessingOrderId(null)
+    }
+  }
+
+  const handleDeleteOrder = async (orderId: string | undefined) => {
+    if (!orderId) return
+
+    setProcessingOrderId(orderId)
+
+    try {
+      await deleteDoc(doc(db, "orders", orderId))
+
+      toast({
+        title: "Buyurtma o'chirildi",
+        description: "Buyurtma muvaffaqiyatli o'chirildi.",
+      })
+
+      // Play delete sound
+      const audio = new Audio("/click.mp3")
+      audio.play().catch((e) => console.error("Error playing sound:", e))
+    } catch (error) {
+      console.error("Error deleting order:", error)
+      toast({
+        title: "Xatolik",
+        description: "Buyurtmani o'chirishda xatolik yuz berdi.",
         variant: "destructive",
       })
     } finally {
@@ -166,10 +185,7 @@ export function WaiterPage() {
 
             <TabsContent value="ready" className="mt-0">
               {isLoading ? (
-                                      <div className="flex min-h-screen flex-col items-center justify-center">
-                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
-                                    </div>
+                <p>Buyurtmalar yuklanmoqda...</p>
               ) : readyOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -233,27 +249,28 @@ export function WaiterPage() {
                             </li>
                           ))}
                         </ul>
-                        <div className="border-t pt-3 mb-4">
+                        <div className="border-t pt-3 mb-3">
                           <div className="flex justify-between font-medium">
                             <span>Jami:</span>
                             <span>{formatCurrency(order.total)}</span>
                           </div>
                         </div>
                         <Button
-                          className="w-full bg-green-500 hover:bg-green-600"
+                          className="w-full"
+                          variant="default"
                           onClick={() => handleUpdateStatus(order.id, "completed")}
                           disabled={processingOrderId === order.id}
                         >
                           {processingOrderId === order.id ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            <span className="flex items-center">
+                              <Clock className="animate-spin mr-2 h-4 w-4" />
                               Jarayonda...
-                            </>
+                            </span>
                           ) : (
-                            <>
+                            <span className="flex items-center">
                               <CheckCircle className="mr-2 h-4 w-4" />
                               Yakunlash
-                            </>
+                            </span>
                           )}
                         </Button>
                       </CardContent>
@@ -265,10 +282,7 @@ export function WaiterPage() {
 
             <TabsContent value="completed" className="mt-0">
               {isLoading ? (
-                                      <div className="flex min-h-screen flex-col items-center justify-center">
-                                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                                      <p className="mt-4 text-muted-foreground">Buyurtmalar yuklanmoqda...</p>
-                                    </div>
+                <p>Buyurtmalar yuklanmoqda...</p>
               ) : completedOrders.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
                   <Clock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -339,6 +353,23 @@ export function WaiterPage() {
                           </div>
                         </div>
                       </CardContent>
+                      <CardFooter className="p-4 pt-0">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Buyurtmani o'chirish</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Siz rostdan ham bu buyurtmani o'chirmoqchimisiz? Bu amalni qaytarib bo'lmaydi.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </CardFooter>
                     </Card>
                   ))}
                 </div>
