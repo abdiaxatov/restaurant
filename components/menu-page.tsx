@@ -128,13 +128,15 @@ export function MenuPage() {
       {/* Bottom category filter - only show in menu tab */}
       {activeTab === "menu" && (
         <>
-          <div className="fixed bottom-0 left-0 right-0 z-10 bg-white p-4 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
-            <div className="overflow-x-auto pb-1">
+          <div className="fixed bottom-0 left-0 right-0 z-10 bg-white  shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
+            <div className="overflow-x-auto  p-4">
               <CategoryFilter
                 categories={categories}
                 selectedCategory={selectedCategory}
                 onSelectCategory={handleCategorySelect}
               />
+            </div>
+            <div className="flex items-center justify-center text-xs text-muted-foreground pb-2"><p>© 2025 <a className="text-primary" href="http://abdiaxatov.uz"> Abdiaxatov </a> IT xizmatlar</p>
             </div>
           </div>
           <div className="fixed bottom-16 pb-10 right-4 z-50">
