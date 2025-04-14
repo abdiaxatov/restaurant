@@ -129,7 +129,7 @@ export function MenuPage() {
       {activeTab === "menu" && (
         <>
           <div className="fixed bottom-0 left-0 right-0 z-10 bg-white  shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
-            <div className="overflow-x-auto  p-4">
+            <div className="overflow-x-auto  p-2">
               <CategoryFilter
                 categories={categories}
                 selectedCategory={selectedCategory}
