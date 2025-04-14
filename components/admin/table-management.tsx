@@ -53,6 +53,7 @@ type Table = {
   roomId?: string | null
   createdAt?: any
   updatedAt?: any
+  waiterId?: string | null
 }
 
 type Room = {
@@ -62,6 +63,7 @@ type Room = {
   status?: "available" | "occupied"
   createdAt?: any
   updatedAt?: any
+  waiterId?: string | null
 }
 
 type Order = {
@@ -114,7 +116,13 @@ export function TableManagement() {
   const [roomTables, setRoomTables] = useState<Table[]>([])
 
   // Order details view
-  const [viewingOrderDetails, setViewingOrderDetails] = useState<Order | null>(null)
+  const [viewingOrderDetails, setViewingOrderDetails] = useState<Order[] | null>(null)
+
+  // Add a new state for waiters list
+  const [waiters, setWaiters] = useState<any[]>([])
+  const [newTableWaiterId, setNewTableWaiterId] = useState<string | null>(null)
+  const [batchTableWaiterId, setBatchTableWaiterId] = useState<string | null>(null)
+  const [newRoomWaiterId, setNewRoomWaiterId] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
@@ -193,6 +201,21 @@ export function TableManagement() {
           },
         )
 
+        // Inside the fetchData function, after the roomsUnsubscribe setup
+        const waitersUnsubscribe = onSnapshot(
+          query(collection(db, "users"), where("role", "==", "waiter")),
+          (snapshot) => {
+            const waitersData: any[] = []
+            snapshot.forEach((doc) => {
+              waitersData.push({ id: doc.id, ...doc.data() })
+            })
+            setWaiters(waitersData)
+          },
+          (error) => {
+            console.error("Error fetching waiters:", error)
+          },
+        )
+
         // Active orders listener (pending, preparing, ready)
         const ordersUnsubscribe = onSnapshot(
           query(collection(db, "orders"), where("status", "in", ["pending", "preparing", "ready"])),
@@ -211,6 +234,10 @@ export function TableManagement() {
         return () => {
           tablesUnsubscribe()
           roomsUnsubscribe()
+          // Add this to the return cleanup function
+          if (typeof waitersUnsubscribe === "function") {
+            waitersUnsubscribe()
+          }
           ordersUnsubscribe()
         }
       } catch (error) {
@@ -278,26 +305,44 @@ export function TableManagement() {
     return activeOrders.some((order) => order.roomNumber === roomNumber)
   }
 
-  // Get active order for a table
-  const getActiveOrderForTable = (tableNumber: number) => {
-    return activeOrders.find((order) => order.tableNumber === tableNumber)
+  // Bir stolga berilgan barcha buyurtmalarni ko'rish uchun o'zgartirishlar
+  // table-management.tsx faylidagi getActiveOrderForTable funksiyasini o'zgartiramiz:
+
+  // Get active orders for a table
+  const getActiveOrdersForTable = (tableNumber: number) => {
+    return activeOrders.filter((order) => order.tableNumber === tableNumber)
   }
 
-  // Get active order for a room
-  const getActiveOrderForRoom = (roomNumber: number) => {
-    return activeOrders.find((order) => order.roomNumber === roomNumber)
+  // Get active orders for a room
+  const getActiveOrdersForRoom = (roomNumber: number) => {
+    return activeOrders.filter((order) => order.roomNumber === roomNumber)
   }
+
+  // hasActiveOrder funksiyasini o'zgartirishsiz qoldiramiz
+  // hasActiveRoomOrder funksiyasini o'zgartirishsiz qoldiramiz
+
+  // Get active order for a table
+  // const getActiveOrderForTable = (tableNumber: number) => {
+  //   return activeOrders.find((order) => order.tableNumber === tableNumber)
+  // }
+
+  // Get active order for a room
+  // const getActiveOrderForRoom = (roomNumber: number) => {
+  //   return activeOrders.find((order) => order.roomNumber === roomNumber)
+  // }
 
   // Add a single table
   const handleAddTable = async () => {
     setIsSubmitting(true)
 
     try {
+      // Update the handleAddTable function to include waiterId
       const tableData = {
         number: newTableNumber,
         seats: newTableSeats,
         status: newTableStatus,
         roomId: newTableRoomId === "none" ? null : newTableRoomId,
+        waiterId: newTableWaiterId,
         createdAt: new Date(),
       }
 
@@ -308,6 +353,7 @@ export function TableManagement() {
       setNewTableSeats(4)
       setNewTableRoomId(null)
       setNewTableStatus("available")
+      setNewTableWaiterId(null)
 
       toast({
         title: "Muvaffaqiyatli",
@@ -333,11 +379,13 @@ export function TableManagement() {
       const batch = writeBatch(db)
 
       for (let i = 0; i < batchTableCount; i++) {
+        // Update the handleBatchAddTables function to include waiterId
         const tableData = {
           number: batchTableStartNumber + i,
           seats: batchTableSeats,
           status: "available",
           roomId: batchTableRoomId === "none" ? null : batchTableRoomId,
+          waiterId: batchTableWaiterId,
           createdAt: new Date(),
         }
 
@@ -349,6 +397,7 @@ export function TableManagement() {
 
       setIsBatchAddingTables(false)
       setBatchTableStartNumber((prev) => prev + batchTableCount)
+      setBatchTableWaiterId(null)
 
       toast({
         title: "Muvaffaqiyatli",
@@ -372,11 +421,13 @@ export function TableManagement() {
     setIsSubmitting(true)
 
     try {
+      // Update the handleEditTable function to include waiterId
       const tableData = {
         number: newTableNumber,
         seats: newTableSeats,
         status: newTableStatus,
         roomId: newTableRoomId === "none" ? null : newTableRoomId,
+        waiterId: newTableWaiterId,
         updatedAt: new Date(),
       }
 
@@ -449,10 +500,12 @@ export function TableManagement() {
     setIsSubmitting(true)
 
     try {
+      // Update the handleAddRoom function to include waiterId
       const roomData = {
         number: newRoomNumber,
         capacity: newRoomCapacity,
         status: newRoomStatus,
+        waiterId: newRoomWaiterId,
         createdAt: new Date(),
       }
 
@@ -462,6 +515,7 @@ export function TableManagement() {
       setNewRoomNumber((prev) => prev + 1)
       setNewRoomCapacity(20)
       setNewRoomStatus("available")
+      setNewRoomWaiterId(null)
 
       toast({
         title: "Muvaffaqiyatli",
@@ -485,10 +539,12 @@ export function TableManagement() {
     setIsSubmitting(true)
 
     try {
+      // Update the handleEditRoom function to include waiterId
       const roomData = {
         number: newRoomNumber,
         capacity: newRoomCapacity,
         status: newRoomStatus,
+        waiterId: newRoomWaiterId,
         updatedAt: new Date(),
       }
 
@@ -669,6 +725,13 @@ export function TableManagement() {
     }
   }
 
+  // Add a function to get waiter name by ID
+  const getWaiterName = (waiterId: string | null | undefined) => {
+    if (!waiterId) return "Belgilanmagan"
+    const waiter = waiters.find((w) => w.id === waiterId)
+    return waiter ? waiter.name : "Belgilanmagan"
+  }
+
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6 flex items-center justify-between">
@@ -728,8 +791,8 @@ export function TableManagement() {
                 <Badge
                   className="bg-blue-100 text-blue-800 cursor-pointer"
                   onClick={() => {
-                    const order = getActiveOrderForRoom(viewingRoomTables.number)
-                    if (order) setViewingOrderDetails(order)
+                    const orders = getActiveOrdersForRoom(viewingRoomTables.number)
+                    if (orders.length > 0) setViewingOrderDetails(orders)
                   }}
                 >
                   <ClipboardList className="mr-1 h-3 w-3" />
@@ -785,6 +848,22 @@ export function TableManagement() {
                           <SelectItem value="available">Bo'sh</SelectItem>
                           <SelectItem value="occupied">Band</SelectItem>
                           <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tableWaiter">Ofitsiant</Label>
+                      <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
+                        <SelectTrigger id="tableWaiter">
+                          <SelectValue placeholder="Ofitsiantni tanlang" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Belgilanmagan</SelectItem>
+                          {waiters.map((waiter) => (
+                            <SelectItem key={waiter.id} value={waiter.id}>
+                              {waiter.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -855,6 +934,22 @@ export function TableManagement() {
                         onChange={(e) => setBatchTableSeats(Number.parseInt(e.target.value) || 4)}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="batchWaiter">Ofitsiant</Label>
+                      <Select value={batchTableWaiterId || "none"} onValueChange={setBatchTableWaiterId}>
+                        <SelectTrigger id="batchWaiter">
+                          <SelectValue placeholder="Ofitsiantni tanlang" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Belgilanmagan</SelectItem>
+                          {waiters.map((waiter) => (
+                            <SelectItem key={waiter.id} value={waiter.id}>
+                              {waiter.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setIsBatchAddingTables(false)} disabled={isSubmitting}>
@@ -917,6 +1012,7 @@ export function TableManagement() {
                               setNewTableSeats(table.seats)
                               setNewTableRoomId(table.roomId || null)
                               setNewTableStatus(table.status)
+                              setNewTableWaiterId(table.waiterId || null)
                               setIsEditingTable(true)
                             }}
                           >
@@ -954,6 +1050,10 @@ export function TableManagement() {
                           />
                         </div>
                       </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Ofitsiant:</span>
+                        <span className="text-sm">{getWaiterName(table.waiterId)}</span>
+                      </div>
 
                       {hasActiveOrder(table.number) && (
                         <div className="mt-2">
@@ -962,8 +1062,8 @@ export function TableManagement() {
                             size="sm"
                             className="w-full"
                             onClick={() => {
-                              const order = getActiveOrderForTable(table.number)
-                              if (order) setViewingOrderDetails(order)
+                              const orders = getActiveOrdersForTable(table.number)
+                              if (orders.length > 0) setViewingOrderDetails(orders)
                             }}
                           >
                             <ClipboardList className="mr-2 h-4 w-4" />
@@ -986,43 +1086,47 @@ export function TableManagement() {
               ← Orqaga
             </Button>
             <h2 className="ml-4 text-xl font-semibold">
-              {viewingOrderDetails.roomNumber
-                ? `Xona #${viewingOrderDetails.roomNumber} buyurtmasi`
-                : `Stol #${viewingOrderDetails.tableNumber} buyurtmasi`}
+              {viewingOrderDetails[0].roomNumber
+                ? `Xona #${viewingOrderDetails[0].roomNumber} buyurtmalari`
+                : `Stol #${viewingOrderDetails[0].tableNumber} buyurtmalari`}
             </h2>
           </div>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Buyurtma tafsilotlari</CardTitle>
-                <Badge className="bg-blue-500">{getStatusText(viewingOrderDetails.status)}</Badge>
-              </div>
-              <CardDescription>Buyurtma vaqti: {formatDate(viewingOrderDetails.createdAt)}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-medium">Taomlar:</h3>
-                  <ul className="mt-2 space-y-2">
-                    {viewingOrderDetails.items.map((item, index) => (
-                      <li key={index} className="flex justify-between">
-                        <span>
-                          {item.name} × {item.quantity}
-                        </span>
-                        <span>{formatCurrency(item.price * item.quantity)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+          <div className="space-y-4">
+            {viewingOrderDetails.map((order, index) => (
+              <Card key={index}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Buyurtma #{index + 1}</CardTitle>
+                    <Badge className="bg-blue-500">{getStatusText(order.status)}</Badge>
+                  </div>
+                  <CardDescription>Buyurtma vaqti: {formatDate(order.createdAt)}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="font-medium">Taomlar:</h3>
+                      <ul className="mt-2 space-y-2">
+                        {order.items.map((item, idx) => (
+                          <li key={idx} className="flex justify-between">
+                            <span>
+                              {item.name} × {item.quantity}
+                            </span>
+                            <span>{formatCurrency(item.price * item.quantity)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
 
-                <div className="flex justify-between border-t pt-2">
-                  <span className="font-semibold">Jami:</span>
-                  <span className="font-semibold">{formatCurrency(viewingOrderDetails.total)}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="font-semibold">Jami:</span>
+                      <span className="font-semibold">{formatCurrency(order.total)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       ) : (
         <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
@@ -1046,6 +1150,21 @@ export function TableManagement() {
                   <Label htmlFor="show-occupied">Band stollarni ko'rsatish</Label>
                 </div>
 
+                {rooms.length > 0 && (
+                  <Select value={selectedRoomFilter || "all"} onValueChange={setSelectedRoomFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Xonani tanlang" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Barcha xonalar</SelectItem>
+                      {rooms.map((room) => (
+                        <SelectItem key={room.id} value={room.id}>
+                          {room.number} xona
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               <div className="flex gap-2">
@@ -1083,6 +1202,22 @@ export function TableManagement() {
                         </div>
                       </div>
                       <div className="space-y-2">
+                        <Label htmlFor="tableRoom">Xona</Label>
+                        <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
+                          <SelectTrigger id="tableRoom">
+                            <SelectValue placeholder="Xonani tanlang" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Xonasiz</SelectItem>
+                            {rooms.map((room) => (
+                              <SelectItem key={room.id} value={room.id}>
+                                {room.number} xona
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
                         <Label htmlFor="tableStatus">Status</Label>
                         <Select
                           value={newTableStatus}
@@ -1095,6 +1230,22 @@ export function TableManagement() {
                             <SelectItem value="available">Bo'sh</SelectItem>
                             <SelectItem value="occupied">Band</SelectItem>
                             <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="tableWaiter">Ofitsiant</Label>
+                        <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
+                          <SelectTrigger id="tableWaiter">
+                            <SelectValue placeholder="Ofitsiantni tanlang" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Belgilanmagan</SelectItem>
+                            {waiters.map((waiter) => (
+                              <SelectItem key={waiter.id} value={waiter.id}>
+                                {waiter.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1159,6 +1310,22 @@ export function TableManagement() {
                           onChange={(e) => setBatchTableSeats(Number.parseInt(e.target.value) || 4)}
                         />
                       </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="batchWaiter">Ofitsiant</Label>
+                        <Select value={batchTableWaiterId || "none"} onValueChange={setBatchTableWaiterId}>
+                          <SelectTrigger id="batchWaiter">
+                            <SelectValue placeholder="Xonani tanlang" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Belgilanmagan</SelectItem>
+                            {waiters.map((waiter) => (
+                              <SelectItem key={waiter.id} value={waiter.id}>
+                                {waiter.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setIsBatchAddingTables(false)} disabled={isSubmitting}>
@@ -1215,6 +1382,7 @@ export function TableManagement() {
                                 setNewTableSeats(table.seats)
                                 setNewTableRoomId(table.roomId || null)
                                 setNewTableStatus(table.status)
+                                setNewTableWaiterId(table.waiterId || null)
                                 setIsEditingTable(true)
                               }}
                             >
@@ -1255,6 +1423,10 @@ export function TableManagement() {
                             />
                           </div>
                         </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">Ofitsiant:</span>
+                          <span className="text-sm">{getWaiterName(table.waiterId)}</span>
+                        </div>
 
                         {hasActiveOrder(table.number) && (
                           <div className="mt-2">
@@ -1263,8 +1435,8 @@ export function TableManagement() {
                               size="sm"
                               className="w-full"
                               onClick={() => {
-                                const order = getActiveOrderForTable(table.number)
-                                if (order) setViewingOrderDetails(order)
+                                const orders = getActiveOrdersForTable(table.number)
+                                if (orders.length > 0) setViewingOrderDetails(orders)
                               }}
                             >
                               <ClipboardList className="mr-2 h-4 w-4" />
@@ -1308,6 +1480,22 @@ export function TableManagement() {
                     </div>
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="editTableRoom">Xona</Label>
+                    <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
+                      <SelectTrigger id="editTableRoom">
+                        <SelectValue placeholder="Xonani tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Xonasiz</SelectItem>
+                        {rooms.map((room) => (
+                          <SelectItem key={room.id} value={room.id}>
+                            {room.number} xona
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="editTableStatus">Status</Label>
                     <Select
                       value={newTableStatus}
@@ -1320,6 +1508,22 @@ export function TableManagement() {
                         <SelectItem value="available">Bo'sh</SelectItem>
                         <SelectItem value="occupied">Band</SelectItem>
                         <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="editTableWaiter">Ofitsiant</Label>
+                    <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
+                      <SelectTrigger id="editTableWaiter">
+                        <SelectValue placeholder="Ofitsiantni tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Belgilanmagan</SelectItem>
+                        {waiters.map((waiter) => (
+                          <SelectItem key={waiter.id} value={waiter.id}>
+                            {waiter.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1399,6 +1603,22 @@ export function TableManagement() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="roomWaiter">Ofitsiant</Label>
+                      <Select value={newRoomWaiterId || "none"} onValueChange={setNewRoomWaiterId}>
+                        <SelectTrigger id="roomWaiter">
+                          <SelectValue placeholder="Ofitsiantni tanlang" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Belgilanmagan</SelectItem>
+                          {waiters.map((waiter) => (
+                            <SelectItem key={waiter.id} value={waiter.id}>
+                              {waiter.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setIsAddingRoom(false)} disabled={isSubmitting}>
@@ -1444,6 +1664,7 @@ export function TableManagement() {
                                 setNewRoomNumber(room.number)
                                 setNewRoomCapacity(room.capacity)
                                 setNewRoomStatus(room.status || "available")
+                                setNewRoomWaiterId(room.waiterId || null)
                                 setIsEditingRoom(true)
                               }}
                             >
@@ -1475,6 +1696,10 @@ export function TableManagement() {
                             />
                           </div>
                         </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">Ofitsiant:</span>
+                          <span className="text-sm">{getWaiterName(room.waiterId)}</span>
+                        </div>
 
                         {hasActiveRoomOrder(room.number) && (
                           <div className="mt-2">
@@ -1483,8 +1708,8 @@ export function TableManagement() {
                               size="sm"
                               className="w-full"
                               onClick={() => {
-                                const order = getActiveOrderForRoom(room.number)
-                                if (order) setViewingOrderDetails(order)
+                                const orders = getActiveOrdersForRoom(room.number)
+                                if (orders.length > 0) setViewingOrderDetails(orders)
                               }}
                             >
                               <ClipboardList className="mr-2 h-4 w-4" />
@@ -1494,6 +1719,10 @@ export function TableManagement() {
                         )}
                       </CardContent>
                       <CardFooter className="p-4 pt-0">
+                        <Button variant="outline" className="w-full" onClick={() => setViewingRoomTables(room)}>
+                          <LayoutGrid className="mr-2 h-4 w-4" />
+                          Stollarni ko'rish
+                        </Button>
                       </CardFooter>
                     </Card>
                   ))
@@ -1541,6 +1770,22 @@ export function TableManagement() {
                       <SelectContent>
                         <SelectItem value="available">Bo'sh</SelectItem>
                         <SelectItem value="occupied">Band</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="editRoomWaiter">Ofitsiant</Label>
+                    <Select value={newRoomWaiterId || "none"} onValueChange={setNewRoomWaiterId}>
+                      <SelectTrigger id="editRoomWaiter">
+                        <SelectValue placeholder="Ofitsiantni tanlang" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Belgilanmagan</SelectItem>
+                        {waiters.map((waiter) => (
+                          <SelectItem key={waiter.id} value={waiter.id}>
+                            {waiter.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

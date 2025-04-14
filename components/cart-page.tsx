@@ -56,6 +56,40 @@ export function CartPage() {
     address?: boolean
   }>({})
 
+  // Check if there's a recent order and set the table/room automatically
+  useEffect(() => {
+    try {
+      const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+      if (lastOrderInfoStr) {
+        const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+        const lastOrderTime = new Date(lastOrderInfo.timestamp)
+        const currentTime = new Date()
+
+        // Calculate the difference in minutes
+        const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
+
+        // If the last order was within 20 minutes, automatically select that table/room
+        if (diffInMinutes <= 20) {
+          if (lastOrderInfo.tableNumber) {
+            setTableNumber(lastOrderInfo.tableNumber)
+            toast({
+              title: "Stol avtomatik tanlandi",
+              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.tableNumber}-stol avtomatik tanlandi.`,
+            })
+          } else if (lastOrderInfo.roomNumber) {
+            setRoomNumber(lastOrderInfo.roomNumber)
+            toast({
+              title: "Xona avtomatik tanlandi",
+              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.roomNumber}-xona avtomatik tanlandi.`,
+            })
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error checking last order info:", error)
+    }
+  }, [toast])
+
   // Check if there are available tables, rooms and if delivery is available
   useEffect(() => {
     setIsLoading(true)
@@ -379,6 +413,16 @@ export function CartPage() {
 
       // Add order to Firestore
       const docRef = await addDoc(collection(db, "orders"), orderData)
+
+      // Oxirgi tanlangan stol/xonani saqlash
+      if (orderType === "table") {
+        const lastOrderInfo = {
+          tableNumber: tableNumber,
+          roomNumber: roomNumber,
+          timestamp: new Date().toISOString(),
+        }
+        localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+      }
 
       // Update remaining servings for each item
       for (const item of items) {

@@ -8,6 +8,10 @@ import { formatCurrency } from "@/lib/utils"
 import { Minus, Plus, Trash2 } from "lucide-react"
 import type { CartItem as CartItemType } from "@/types"
 import { motion } from "framer-motion"
+import { doc, getDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import { toast } from "@/components/ui/use-toast"
+import type { MenuItem } from "@/types"
 
 interface CartItemProps {
   item: CartItemType
@@ -16,11 +20,41 @@ interface CartItemProps {
 export function CartItem({ item }: CartItemProps) {
   const { updateItemQuantity, removeItem } = useCart()
   const [isRemoving, setIsRemoving] = useState(false)
+  const handleIncrement = async () => {
+    // Mahsulotning hozirgi qolgan miqdorini tekshirish
+    try {
+      const menuItemRef = doc(db, "menuItems", item.id)
+      const menuItemSnap = await getDoc(menuItemRef)
 
-  const handleIncrement = () => {
-    // Play click sound
+      if (menuItemSnap.exists()) {
+        const menuItemData = menuItemSnap.data() as MenuItem
+        const remainingServings =
+          menuItemData.remainingServings !== undefined ? menuItemData.remainingServings : menuItemData.servesCount
+
+        // Agar qo'shiladigan miqdor qolgan miqdordan ko'p bo'lsa, xatolik chiqarish
+        if (item.quantity + 1 > remainingServings) {
+          // Xatolik tovushini ijro etish
+          const audio = new Audio("/notification.mp3")
+          audio.play().catch((e) => console.error("Error playing sound:", e))
+
+          // Xatolik xabarini ko'rsatish
+          toast({
+            title: "Yetarli porsiya yo'q",
+            description: `Kechirasiz, ${item.name} taomidan faqat ${remainingServings} porsiya qolgan.`,
+            variant: "destructive",
+          })
+          return
+        }
+      }
+    } catch (error) {
+      console.error("Error checking remaining servings:", error)
+    }
+
+    // Tovush ijro etish
     const audio = new Audio("/click.mp3")
     audio.play().catch((e) => console.error("Error playing sound:", e))
+
+    // Miqdorni oshirish
     updateItemQuantity(item.id, item.quantity + 1)
   }
 

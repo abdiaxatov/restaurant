@@ -26,19 +26,23 @@ export interface Category {
   imageUrl?: string
 }
 
+// Update the Table interface to include waiterId
 export interface Table {
   id: string
   number: number
   seats: number
   status: "available" | "occupied" | "reserved"
   roomId?: string
+  waiterId?: string
 }
 
+// Update the Room interface to include waiterId
 export interface Room {
   id: string
   number: number
   status: "available" | "occupied" | "reserved"
   description?: string
+  waiterId?: string
 }
 
 export interface Order {
