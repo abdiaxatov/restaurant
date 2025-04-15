@@ -1,7 +1,6 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-
 import { useState, useEffect, useRef } from "react"
 import {
   collection,
@@ -16,28 +15,29 @@ import {
   serverTimestamp,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { AdminLayout } from "@/components/admin/admin-layout"
+import AdminLayout  from "@/components/admin/admin-layout"
 import { OrderList } from "@/components/admin/order-list"
 import { OrderDetails } from "@/components/admin/order-details"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, getStatusText } from "@/lib/utils"
 import {
   ShoppingBag,
   DollarSign,
   Clock,
-  Truck,
   Loader2,
   Search,
   Filter,
   ArrowUpRight,
   ArrowDownRight,
   Bell,
-  BarChart,
+  BarChartIcon,
   ChevronRight,
   Utensils,
+  CreditCard,
+  User,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -50,9 +50,8 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
+  BarChart,
+  Bar,
 } from "recharts"
 import type { Order } from "@/types"
 import { format, subDays, startOfDay, endOfDay } from "date-fns"
@@ -77,8 +76,42 @@ export function AdminDashboard() {
     ordersChange: 0,
     revenueChange: 0,
   })
-  const [topItems, setTopItems] = useState<{ name: string; count: number; value: number }[]>([])
+  const [statusData, setStatusData] = useState<{ name: string; count: number }[]>([])
   const [revenueData, setRevenueData] = useState<{ date: string; revenue: number }[]>([])
+  const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([])
+  const [waiterFilter, setWaiterFilter] = useState<string>("all")
+
+  useEffect(() => {
+    // Load saved waiter filter from localStorage
+    const savedWaiterFilter = localStorage.getItem("dashboardWaiterFilter")
+    if (savedWaiterFilter) {
+      setWaiterFilter(savedWaiterFilter)
+    }
+
+    // Fetch waiters
+    const fetchWaiters = async () => {
+      try {
+        const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+        const waitersSnapshot = await getDocs(waitersQuery)
+        const waitersList: { id: string; name: string }[] = []
+
+        waitersSnapshot.forEach((doc) => {
+          waitersList.push({ id: doc.id, name: doc.data().name })
+        })
+
+        setWaiters(waitersList)
+      } catch (error) {
+        console.error("Error fetching waiters:", error)
+      }
+    }
+
+    fetchWaiters()
+  }, [])
+
+  // Save waiter filter to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("dashboardWaiterFilter", waiterFilter)
+  }, [waiterFilter])
 
   useEffect(() => {
     // Initialize audio element
@@ -111,8 +144,14 @@ export function AdminDashboard() {
         const ordersList: Order[] = []
         let todayOrderCount = 0
         let todayRevenue = 0
-        const itemCounts: Record<string, number> = {}
         const dailyData: Record<string, number> = {}
+        const statusCounts: Record<string, number> = {
+          pending: 0,
+          preparing: 0,
+          ready: 0,
+          completed: 0,
+          paid: 0,
+        }
 
         snapshot.forEach((doc) => {
           const data = doc.data()
@@ -130,15 +169,11 @@ export function AdminDashboard() {
           if (orderDate && orderDate >= startOfToday && orderDate <= endOfToday) {
             todayOrderCount++
             todayRevenue += order.total
+          }
 
-            // Count items for popularity
-            order.items.forEach((item: { name: string; quantity: number }) => {
-              if (itemCounts[item.name]) {
-                itemCounts[item.name] += item.quantity
-              } else {
-                itemCounts[item.name] = item.quantity
-              }
-            })
+          // Count statuses
+          if (statusCounts[order.status] !== undefined) {
+            statusCounts[order.status]++
           }
 
           // Aggregate daily data for the last 7 days
@@ -164,13 +199,13 @@ export function AdminDashboard() {
 
         setRevenueData(last7Days)
 
-        // Convert to array and sort by count for top items
-        const topItemsArray = Object.entries(itemCounts)
-          .map(([name, count]) => ({ name, count, value: count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5)
+        // Prepare status data for chart
+        const statusDataArray = Object.entries(statusCounts).map(([name, count]) => ({
+          name: getStatusText(name),
+          count,
+        }))
 
-        setTopItems(topItemsArray)
+        setStatusData(statusDataArray)
         setOrders(ordersList)
         setIsLoading(false)
 
@@ -308,7 +343,7 @@ export function AdminDashboard() {
     }
   }
 
-  // Filter orders based on status, type, date, and search query
+  // Filter orders based on status, type, date, search query, and waiter
   const filteredOrders = orders.filter((order) => {
     // Filter by status
     const statusMatch = statusFilter === "all" || order.status === statusFilter
@@ -321,6 +356,21 @@ export function AdminDashboard() {
     if (dateFilter) {
       const orderDate = order.createdAt?.toDate ? format(new Date(order.createdAt.toDate()), "yyyy-MM-dd") : ""
       dateMatch = orderDate === dateFilter
+    }
+
+    // Filter by waiter
+    let waiterMatch = true
+    if (waiterFilter !== "all" && order.orderType === "table") {
+      // Get waiter ID from table or room
+      let waiterId = null
+      if (order.tableNumber) {
+        const table = orders.find((o) => o.tableNumber === order.tableNumber)
+        waiterId = table?.waiterId
+      } else if (order.roomNumber) {
+        const room = orders.find((o) => o.roomNumber === order.roomNumber)
+        waiterId = room?.waiterId
+      }
+      waiterMatch = waiterId === waiterFilter
     }
 
     // Filter by search query
@@ -339,7 +389,7 @@ export function AdminDashboard() {
         order.items.some((item) => item.name.toLowerCase().includes(query))
     }
 
-    return statusMatch && typeMatch && dateMatch && searchMatch
+    return statusMatch && typeMatch && dateMatch && searchMatch && waiterMatch
   })
 
   // Count orders by status
@@ -347,6 +397,7 @@ export function AdminDashboard() {
   const preparingCount = orders.filter((order) => order.status === "preparing").length
   const readyCount = orders.filter((order) => order.status === "ready").length
   const completedCount = orders.filter((order) => order.status === "completed").length
+  const paidCount = orders.filter((order) => order.status === "paid").length
 
   // Count orders by type
   const tableOrdersCount = orders.filter((order) => order.orderType === "table").length
@@ -368,6 +419,11 @@ export function AdminDashboard() {
   const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total, 0)
   const todayOrdersCount = todayOrders.length
 
+  // Calculate paid orders revenue
+  const paidOrdersRevenue = orders
+    .filter((order) => order.status === "paid")
+    .reduce((sum, order) => sum + order.total, 0)
+
   const renderChangeIndicator = (value: number) => {
     if (value > 0) {
       return (
@@ -386,8 +442,6 @@ export function AdminDashboard() {
     }
     return <span className="text-muted-foreground">0%</span>
   }
-
-  const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d"]
 
   return (
     <AdminLayout>
@@ -469,15 +523,12 @@ export function AdminDashboard() {
 
           <Card className="shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Yakunlangan buyurtmalar</CardTitle>
-              <Truck className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">To'langan buyurtmalar</CardTitle>
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{completedCount}</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                Jami:{" "}
-                {formatCurrency(orders.filter((o) => o.status === "completed").reduce((sum, o) => sum + o.total, 0))}
-              </div>
+              <div className="text-2xl font-bold">{paidCount}</div>
+              <div className="mt-1 text-sm text-muted-foreground">Jami: {formatCurrency(paidOrdersRevenue)}</div>
             </CardContent>
           </Card>
         </div>
@@ -487,7 +538,7 @@ export function AdminDashboard() {
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <BarChart className="h-5 w-5" />
+                <BarChartIcon className="h-5 w-5" />
                 Haftalik tushum
               </CardTitle>
               <CardDescription>So'nggi 7 kun uchun tushum</CardDescription>
@@ -527,36 +578,26 @@ export function AdminDashboard() {
             </CardFooter>
           </Card>
 
-          {/* Top Items Chart */}
+          {/* Status Chart */}
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Utensils className="h-5 w-5" />
-                Eng mashhur taomlar
+                Buyurtma statuslari
               </CardTitle>
-              <CardDescription>Bugun eng ko'p buyurtma qilingan taomlar</CardDescription>
+              <CardDescription>Buyurtmalar statusi bo'yicha taqsimlanishi</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="h-[250px]">
-                {topItems.length > 0 ? (
+                {statusData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={topItems}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {topItems.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
+                    <BarChart data={statusData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" />
+                      <YAxis dataKey="name" type="category" width={100} />
                       <RechartsTooltip />
-                    </PieChart>
+                      <Bar dataKey="count" name="Buyurtmalar soni" fill="#8884d8" />
+                    </BarChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex h-full items-center justify-center">
@@ -575,6 +616,7 @@ export function AdminDashboard() {
           </Card>
         </div>
 
+        {/* Update the dashboard design for orders section */}
         <div className="mt-8">
           <Card className="shadow-sm">
             <CardHeader>
@@ -629,6 +671,23 @@ export function AdminDashboard() {
                       className="pl-9"
                     />
                   </div>
+
+                  <Select value={waiterFilter} onValueChange={(value) => setWaiterFilter(value)}>
+                    <SelectTrigger className="w-[180px]">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        <SelectValue placeholder="Ofitsiant" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Barcha ofitsiantlar</SelectItem>
+                      {waiters.map((waiter) => (
+                        <SelectItem key={waiter.id} value={waiter.id}>
+                          {waiter.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as "asc" | "desc")}>
                     <SelectTrigger className="w-[180px]">
@@ -701,6 +760,17 @@ export function AdminDashboard() {
                     Yakunlangan{" "}
                     <Badge variant="secondary" className="ml-1">
                       {completedCount}
+                    </Badge>
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("paid")}
+                    className={`rounded-md px-3 py-1 text-sm ${
+                      statusFilter === "paid" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    To'landi{" "}
+                    <Badge variant="secondary" className="ml-1">
+                      {paidCount}
                     </Badge>
                   </button>
                 </div>

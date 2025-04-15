@@ -1,22 +1,23 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore"
+import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { AdminLayout } from "@/components/admin/admin-layout"
+import AdminLayout  from "@/components/admin/admin-layout"
 import { OrderDetails } from "@/components/admin/order-details"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { formatCurrency } from "@/lib/utils"
-import { Loader2, History, AlertTriangle, Calendar, Download } from "lucide-react"
+import { formatCurrency, getStatusColor, getStatusText } from "@/lib/utils"
+import { Loader2, History, AlertTriangle, Calendar, Download, User } from "lucide-react"
 import type { Order } from "@/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { format } from "date-fns"
 import * as XLSX from "xlsx"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export function OrderHistoryPage() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -25,7 +26,103 @@ export function OrderHistoryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("all")
   const [dateFilter, setDateFilter] = useState<string>("")
+  const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([])
+  const [waiterFilter, setWaiterFilter] = useState<string>("all")
+  const [waiterNames, setWaiterNames] = useState<Record<string, string>>({})
+  const [tableWaiters, setTableWaiters] = useState<Record<number, string>>({})
+  const [roomWaiters, setRoomWaiters] = useState<Record<number, string>>({})
   const { toast } = useToast()
+
+  useEffect(() => {
+    // Load saved waiter filter from localStorage
+    const savedWaiterFilter = localStorage.getItem("historyWaiterFilter")
+    if (savedWaiterFilter) {
+      setWaiterFilter(savedWaiterFilter)
+    }
+
+    // Fetch waiters
+    const fetchWaiters = async () => {
+      try {
+        const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+        const waitersSnapshot = await getDocs(waitersQuery)
+        const waitersList: { id: string; name: string }[] = []
+        const waiterData: Record<string, string> = {}
+
+        waitersSnapshot.forEach((doc) => {
+          waitersList.push({ id: doc.id, name: doc.data().name })
+          waiterData[doc.id] = doc.data().name
+        })
+
+        setWaiters(waitersList)
+        setWaiterNames(waiterData)
+      } catch (error) {
+        console.error("Error fetching waiters:", error)
+      }
+    }
+
+    // Fetch tables with their assigned waiters
+    const fetchTableWaiters = async () => {
+      try {
+        const tablesQuery = query(collection(db, "tables"))
+        const tablesSnapshot = await getDocs(tablesQuery)
+        const tableData: Record<number, string> = {}
+
+        tablesSnapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.waiterId) {
+            tableData[data.number] = data.waiterId
+          }
+        })
+
+        setTableWaiters(tableData)
+      } catch (error) {
+        console.error("Error fetching table waiters:", error)
+      }
+    }
+
+    // Fetch rooms with their assigned waiters
+    const fetchRoomWaiters = async () => {
+      try {
+        const roomsQuery = query(collection(db, "rooms"))
+        const roomsSnapshot = await getDocs(roomsQuery)
+        const roomData: Record<number, string> = {}
+
+        roomsSnapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.waiterId) {
+            roomData[data.number] = data.waiterId
+          }
+        })
+
+        setRoomWaiters(roomData)
+      } catch (error) {
+        console.error("Error fetching room waiters:", error)
+      }
+    }
+
+    fetchWaiters()
+    fetchTableWaiters()
+    fetchRoomWaiters()
+  }, [])
+
+  // Save waiter filter to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("historyWaiterFilter", waiterFilter)
+  }, [waiterFilter])
+
+  // Function to get waiter name for an order
+  const getWaiterName = (order: Order) => {
+    if (order.orderType === "table") {
+      if (order.tableNumber && tableWaiters[order.tableNumber]) {
+        const waiterId = tableWaiters[order.tableNumber]
+        return waiterNames[waiterId] || "Belgilanmagan"
+      } else if (order.roomNumber && roomWaiters[order.roomNumber]) {
+        const waiterId = roomWaiters[order.roomNumber]
+        return waiterNames[waiterId] || "Belgilanmagan"
+      }
+    }
+    return "Belgilanmagan"
+  }
 
   useEffect(() => {
     // Get deleted orders from orderHistory collection
@@ -65,7 +162,7 @@ export function OrderHistoryPage() {
     setSelectedOrder(null)
   }
 
-  // Filter orders based on active tab and date
+  // Filter orders based on active tab, date, and waiter
   const filteredOrders = orders.filter((order) => {
     // Filter by tab
     const tabMatch =
@@ -83,7 +180,19 @@ export function OrderHistoryPage() {
       dateMatch = orderDate === dateFilter
     }
 
-    return tabMatch && dateMatch
+    // Filter by waiter
+    let waiterMatch = true
+    if (waiterFilter !== "all" && order.orderType === "table") {
+      if (order.tableNumber && tableWaiters[order.tableNumber]) {
+        waiterMatch = tableWaiters[order.tableNumber] === waiterFilter
+      } else if (order.roomNumber && roomWaiters[order.roomNumber]) {
+        waiterMatch = roomWaiters[order.roomNumber] === waiterFilter
+      } else {
+        waiterMatch = false
+      }
+    }
+
+    return tabMatch && dateMatch && waiterMatch
   })
 
   // Count orders by type
@@ -106,16 +215,20 @@ export function OrderHistoryPage() {
           ? format(new Date(order.deletedAt.toDate()), "yyyy-MM-dd HH:mm")
           : "Unknown"
 
+        const waiterName = order.orderType === "table" ? getWaiterName(order) : "-"
+
         return {
           "Buyurtma ID": order.id,
           "Buyurtma turi": order.orderType === "table" ? "Stol" : "Yetkazib berish",
           "Stol raqami": order.tableNumber || "-",
           "Xona raqami": order.roomNumber || "-",
+          Ofitsiant: waiterName,
+          Status: getStatusText(order.status),
+          "To'langan": order.isPaid ? "Ha" : "Yo'q",
           Telefon: order.phoneNumber || "-",
           Manzil: order.address || "-",
           "Taomlar soni": order.items.reduce((sum, item) => sum + item.quantity, 0),
           "Jami summa": order.total,
-          Status: order.status,
           "Yaratilgan sana": createdDate,
           "O'chirilgan sana": deletedDate,
         }
@@ -156,7 +269,7 @@ export function OrderHistoryPage() {
           <h1 className="text-2xl font-bold">Buyurtmalar tarixi</h1>
         </div>
 
-        <div className="grid gap-4 p-4 md:grid-cols-3">
+        <div className="grid gap-4 p-4 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Jami buyurtmalar</CardTitle>
@@ -184,6 +297,28 @@ export function OrderHistoryPage() {
             </CardHeader>
             <CardContent>
               <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="h-8" />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Ofitsiant bo'yicha</CardTitle>
+              <User className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <Select value={waiterFilter} onValueChange={(value) => setWaiterFilter(value)}>
+                <SelectTrigger className="h-8">
+                  <SelectValue placeholder="Ofitsiant tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Barcha ofitsiantlar</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={waiter.id}>
+                      {waiter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </CardContent>
           </Card>
         </div>
@@ -227,7 +362,7 @@ export function OrderHistoryPage() {
       <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogTitle className="text-lg font-semibold">{selectedOrder ? "Buyurtma tafsilotlari" : ""}</DialogTitle>
-          {selectedOrder && <OrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} />}
+          {selectedOrder && <OrderDetails order={selectedOrder} onClose={handleOrderDetailsClose} isDeleted={true} />}
         </DialogContent>
       </Dialog>
     </AdminLayout>
@@ -276,10 +411,13 @@ export function OrderHistoryPage() {
               <div className="mb-2 flex items-center justify-between">
                 <div className="font-medium">
                   {order.orderType === "table"
-                    ? `Stol #${order.tableNumber || "?"}`
-                    : order.orderType === "delivery"
-                      ? "Yetkazib berish"
-                      : "Buyurtma"}
+                    ? order.roomNumber
+                      ? `Xona #${order.roomNumber}`
+                      : `Stol #${order.tableNumber || "?"}`
+                    : "Yetkazib berish"}
+                  {order.orderType === "table" && (
+                    <span className="ml-1 text-sm text-muted-foreground">- {getWaiterName(order)}</span>
+                  )}
                 </div>
                 <div className="font-semibold text-primary">{formatCurrency(order.total)}</div>
               </div>
@@ -299,6 +437,18 @@ export function OrderHistoryPage() {
                   <span className="font-medium">Yaratilgan:</span>{" "}
                   {order.createdAt?.toDate ? format(new Date(order.createdAt.toDate()), "dd.MM.yyyy HH:mm") : ""}
                 </div>
+                <div className="mb-1">
+                  <span className="font-medium">Status:</span>{" "}
+                  <Badge variant="outline" className={getStatusColor(order.status)}>
+                    {getStatusText(order.status)}
+                  </Badge>
+                </div>
+                {order.isPaid && (
+                  <div className="mb-1">
+                    <span className="font-medium">To'langan:</span>{" "}
+                    {order.paidAt?.toDate ? format(new Date(order.paidAt.toDate()), "dd.MM.yyyy HH:mm") : ""}
+                  </div>
+                )}
               </div>
 
               <div className="mb-3">

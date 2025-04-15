@@ -1,14 +1,14 @@
 "use client"
 
-import { useState } from "react"
-import { doc, updateDoc } from "firebase/firestore"
+import { useState, useEffect } from "react"
+import { doc, updateDoc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, MapPin, Phone } from "lucide-react"
+import { Loader2, MapPin, Phone, User } from "lucide-react"
 import type { Order } from "@/types"
 
 interface OrderDetailsProps {
@@ -19,7 +19,42 @@ interface OrderDetailsProps {
 
 export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetailsProps) {
   const [isUpdating, setIsUpdating] = useState(false)
+  const [waiterName, setWaiterName] = useState<string | null>(null)
   const { toast } = useToast()
+
+  useEffect(() => {
+    // Fetch waiter information if this is a table order
+    const fetchWaiterInfo = async () => {
+      if (order.orderType !== "table") return
+
+      try {
+        // First, get the table or room to find the assigned waiter
+        if (order.tableNumber) {
+          const tablesQuery = await getDoc(doc(db, "tables", `table-${order.tableNumber}`))
+          if (tablesQuery.exists() && tablesQuery.data().waiterId) {
+            const waiterId = tablesQuery.data().waiterId
+            const waiterDoc = await getDoc(doc(db, "users", waiterId))
+            if (waiterDoc.exists()) {
+              setWaiterName(waiterDoc.data().name)
+            }
+          }
+        } else if (order.roomNumber) {
+          const roomsQuery = await getDoc(doc(db, "rooms", `room-${order.roomNumber}`))
+          if (roomsQuery.exists() && roomsQuery.data().waiterId) {
+            const waiterId = roomsQuery.data().waiterId
+            const waiterDoc = await getDoc(doc(db, "users", waiterId))
+            if (waiterDoc.exists()) {
+              setWaiterName(waiterDoc.data().name)
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching waiter info:", error)
+      }
+    }
+
+    fetchWaiterInfo()
+  }, [order])
 
   const handleUpdateStatus = async (newStatus: string) => {
     if (isDeleted) return // Don't allow status updates for deleted orders
@@ -29,6 +64,8 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
       await updateDoc(doc(db, "orders", order.id), {
         status: newStatus,
         updatedAt: new Date(),
+        // Add paid flag if the status is "paid"
+        ...(newStatus === "paid" ? { isPaid: true, paidAt: new Date() } : {}),
       })
 
       // Play appropriate sound based on status
@@ -38,6 +75,7 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
           soundFile = "/cooking.mp3"
           break
         case "completed":
+        case "paid":
           soundFile = "/success.mp3"
           break
       }
@@ -49,7 +87,7 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
 
       toast({
         title: "Status yangilandi",
-        description: `Buyurtma statusi "${newStatus}" ga o'zgartirildi`,
+        description: `Buyurtma statusi "${newStatus === "paid" ? "To'landi" : newStatus}" ga o'zgartirildi`,
       })
     } catch (error) {
       console.error("Error updating order status:", error)
@@ -81,6 +119,8 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
         return "Tayyorlanmoqda"
       case "completed":
         return "Yakunlangan"
+      case "paid":
+        return "To'landi"
       default:
         return status
     }
@@ -103,6 +143,13 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
         <p className="text-sm text-muted-foreground">Buyurtma vaqti: {formatDate(order.createdAt)}</p>
         {order.deletedAt && (
           <p className="text-sm text-muted-foreground">O'chirilgan vaqti: {formatDate(order.deletedAt)}</p>
+        )}
+
+        {order.orderType === "table" && (
+          <div className="mt-1 flex items-center text-sm text-muted-foreground">
+            <User className="mr-1 h-4 w-4" />
+            Ofitsiant: {waiterName || "Belgilanmagan"}
+          </div>
         )}
       </div>
 
@@ -183,7 +230,7 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
               onClick={() => handleUpdateStatus("pending")}
               disabled={isUpdating || order.status === "pending"}
             >
-              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isUpdating && order.status !== "pending" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Kutilmoqda
             </Button>
             <Button
@@ -192,7 +239,7 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
               onClick={() => handleUpdateStatus("preparing")}
               disabled={isUpdating || order.status === "preparing"}
             >
-              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isUpdating && order.status !== "preparing" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Tayyorlanmoqda
             </Button>
             <Button
@@ -201,8 +248,20 @@ export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetails
               onClick={() => handleUpdateStatus("completed")}
               disabled={isUpdating || order.status === "completed"}
             >
-              {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isUpdating && order.status !== "completed" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Yakunlangan
+            </Button>
+            <Button
+              variant={order.status === "paid" ? "default" : "outline"}
+              className={
+                order.status === "paid" ? "bg-green-600 hover:bg-green-700" : "text-green-600 hover:text-green-700"
+              }
+              size="sm"
+              onClick={() => handleUpdateStatus("paid")}
+              disabled={isUpdating || order.status === "paid"}
+            >
+              {isUpdating && order.status !== "paid" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              To'landi
             </Button>
           </div>
         </div>

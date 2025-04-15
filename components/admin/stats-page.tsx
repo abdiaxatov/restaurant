@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { AdminLayout } from "@/components/admin/admin-layout"
+import AdminLayout from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { doc, updateDoc } from "firebase/firestore"
+import { doc, updateDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,11 +9,12 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LoadingSpinner } from "@/components/admin/loading-spinner"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle2, History, Bell, BellOff } from "lucide-react"
+import { Clock, CheckCircle2, History, Bell, BellOff, User } from "lucide-react"
 import type { Order } from "@/types"
-import { getDocs } from "@/lib/getDocs"
+import { getDocs as getDocsHelper } from "@/lib/getDocs"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export function ChefPage() {
   const [pendingOrders, setPendingOrders] = useState<Order[]>([])
@@ -21,15 +22,111 @@ export function ChefPage() {
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([])
+  const [waiterFilter, setWaiterFilter] = useState<string>("all")
+  const [waiterNames, setWaiterNames] = useState<Record<string, string>>({})
+  const [tableWaiters, setTableWaiters] = useState<Record<number, string>>({})
+  const [roomWaiters, setRoomWaiters] = useState<Record<number, string>>({})
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const notificationAudioRef = useRef<HTMLAudioElement | null>(null)
   const previousPendingCountRef = useRef(0)
+
+  useEffect(() => {
+    // Load saved waiter filter from localStorage
+    const savedWaiterFilter = localStorage.getItem("chefWaiterFilter")
+    if (savedWaiterFilter) {
+      setWaiterFilter(savedWaiterFilter)
+    }
+
+    // Fetch waiters
+    const fetchWaiters = async () => {
+      try {
+        const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+        const waitersSnapshot = await getDocs(waitersQuery)
+        const waitersList: { id: string; name: string }[] = []
+        const waiterData: Record<string, string> = {}
+
+        waitersSnapshot.forEach((doc) => {
+          waitersList.push({ id: doc.id, name: doc.data().name })
+          waiterData[doc.id] = doc.data().name
+        })
+
+        setWaiters(waitersList)
+        setWaiterNames(waiterData)
+      } catch (error) {
+        console.error("Error fetching waiters:", error)
+      }
+    }
+
+    // Fetch tables with their assigned waiters
+    const fetchTableWaiters = async () => {
+      try {
+        const tablesQuery = query(collection(db, "tables"))
+        const tablesSnapshot = await getDocs(tablesQuery)
+        const tableData: Record<number, string> = {}
+
+        tablesSnapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.waiterId) {
+            tableData[data.number] = data.waiterId
+          }
+        })
+
+        setTableWaiters(tableData)
+      } catch (error) {
+        console.error("Error fetching table waiters:", error)
+      }
+    }
+
+    // Fetch rooms with their assigned waiters
+    const fetchRoomWaiters = async () => {
+      try {
+        const roomsQuery = query(collection(db, "rooms"))
+        const roomsSnapshot = await getDocs(roomsQuery)
+        const roomData: Record<number, string> = {}
+
+        roomsSnapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.waiterId) {
+            roomData[data.number] = data.waiterId
+          }
+        })
+
+        setRoomWaiters(roomData)
+      } catch (error) {
+        console.error("Error fetching room waiters:", error)
+      }
+    }
+
+    fetchWaiters()
+    fetchTableWaiters()
+    fetchRoomWaiters()
+  }, [])
+
+  // Save waiter filter to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("chefWaiterFilter", waiterFilter)
+  }, [waiterFilter])
+
+  // Function to get waiter name for an order
+  const getWaiterName = (order: Order) => {
+    if (order.orderType === "table") {
+      if (order.tableNumber && tableWaiters[order.tableNumber]) {
+        const waiterId = tableWaiters[order.tableNumber]
+        return waiterNames[waiterId] || "Belgilanmagan"
+      } else if (order.roomNumber && roomWaiters[order.roomNumber]) {
+        const waiterId = roomWaiters[order.roomNumber]
+        return waiterNames[waiterId] || "Belgilanmagan"
+      }
+    }
+    return "Belgilanmagan"
+  }
 
   // Function to fetch orders
   const fetchOrders = async () => {
     try {
       // Get pending orders
-      const pendingOrdersData = await getDocs("orders", [["status", "==", "pending"]])
+      const pendingOrdersData = await getDocsHelper("orders", [["status", "==", "pending"]])
 
       // Check for new orders and play notification if needed
       if (pendingOrdersData.length > previousPendingCountRef.current && soundEnabled) {
@@ -37,15 +134,71 @@ export function ChefPage() {
       }
       previousPendingCountRef.current = pendingOrdersData.length
 
-      setPendingOrders(pendingOrdersData)
+      // Filter orders by waiter if needed
+      let filteredPendingOrders = pendingOrdersData
+      if (waiterFilter !== "all") {
+        filteredPendingOrders = pendingOrdersData.filter((order) => {
+          if (order.orderType !== "table") return false
+
+          if (order.tableNumber && tableWaiters[order.tableNumber]) {
+            return tableWaiters[order.tableNumber] === waiterFilter
+          }
+
+          if (order.roomNumber && roomWaiters[order.roomNumber]) {
+            return roomWaiters[order.roomNumber] === waiterFilter
+          }
+
+          return false
+        })
+      }
+
+      setPendingOrders(filteredPendingOrders)
 
       // Get preparing orders
-      const preparingOrdersData = await getDocs("orders", [["status", "==", "preparing"]])
-      setPreparingOrders(preparingOrdersData)
+      const preparingOrdersData = await getDocsHelper("orders", [["status", "==", "preparing"]])
+
+      // Filter preparing orders by waiter if needed
+      let filteredPreparingOrders = preparingOrdersData
+      if (waiterFilter !== "all") {
+        filteredPreparingOrders = preparingOrdersData.filter((order) => {
+          if (order.orderType !== "table") return false
+
+          if (order.tableNumber && tableWaiters[order.tableNumber]) {
+            return tableWaiters[order.tableNumber] === waiterFilter
+          }
+
+          if (order.roomNumber && roomWaiters[order.roomNumber]) {
+            return roomWaiters[order.roomNumber] === waiterFilter
+          }
+
+          return false
+        })
+      }
+
+      setPreparingOrders(filteredPreparingOrders)
 
       // Get completed orders (limit to last 20 for performance)
-      const completedOrdersData = await getDocs("orders", [["status", "==", "completed"]])
-      setCompletedOrders(completedOrdersData.slice(0, 20)) // Limit to last 20 orders
+      const completedOrdersData = await getDocsHelper("orders", [["status", "==", "completed"]])
+
+      // Filter completed orders by waiter if needed
+      let filteredCompletedOrders = completedOrdersData
+      if (waiterFilter !== "all") {
+        filteredCompletedOrders = completedOrdersData.filter((order) => {
+          if (order.orderType !== "table") return false
+
+          if (order.tableNumber && tableWaiters[order.tableNumber]) {
+            return tableWaiters[order.tableNumber] === waiterFilter
+          }
+
+          if (order.roomNumber && roomWaiters[order.roomNumber]) {
+            return roomWaiters[order.roomNumber] === waiterFilter
+          }
+
+          return false
+        })
+      }
+
+      setCompletedOrders(filteredCompletedOrders.slice(0, 20)) // Limit to last 20 orders
 
       setIsLoading(false)
     } catch (error) {
@@ -70,7 +223,7 @@ export function ChefPage() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [])
+  }, [waiterFilter])
 
   const handleStartPreparing = async (orderId: string) => {
     try {
@@ -133,22 +286,45 @@ export function ChefPage() {
 
   return (
     <div className="container mx-auto p-4">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Oshxona</h1>
-        <div className="flex items-center gap-2">
-          {soundEnabled ? <Bell className="h-5 w-5 text-green-600" /> : <BellOff className="h-5 w-5 text-gray-400" />}
-          <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} id="sound-mode" />
-          <Label htmlFor="sound-mode" className="text-sm">
-            Ovozli bildirishnoma
-          </Label>
+        <div className="flex items-center gap-4">
+          <Select value={waiterFilter} onValueChange={(value) => setWaiterFilter(value)}>
+            <SelectTrigger className="w-[180px]">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4" />
+                <SelectValue placeholder="Ofitsiant" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Barcha ofitsiantlar</SelectItem>
+              {waiters.map((waiter) => (
+                <SelectItem key={waiter.id} value={waiter.id}>
+                  {waiter.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-2">
+            {soundEnabled ? <Bell className="h-5 w-5 text-green-600" /> : <BellOff className="h-5 w-5 text-gray-400" />}
+            <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} id="sound-mode" />
+            <Label htmlFor="sound-mode" className="text-sm">
+              Ovozli bildirishnoma
+            </Label>
+          </div>
         </div>
       </div>
 
       <Tabs defaultValue="pending">
-        <TabsList className="mb-4 grid w-full grid-cols-2">
+        <TabsList className="mb-4 grid w-full grid-cols-3">
           <TabsTrigger value="pending" className="relative">
             Yangi
             {pendingOrders.length > 0 && <Badge className="ml-2 bg-primary">{pendingOrders.length}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="preparing" className="relative">
+            Tayyorlanmoqda
+            {preparingOrders.length > 0 && <Badge className="ml-2 bg-blue-500">{preparingOrders.length}</Badge>}
           </TabsTrigger>
           <TabsTrigger value="history" className="relative">
             <History className="mr-1 h-4 w-4" />
@@ -173,6 +349,11 @@ export function ChefPage() {
                             ? `Xona #${order.roomNumber}`
                             : `Stol #${order.tableNumber}`
                           : "Yetkazib berish"}
+                        {order.orderType === "table" && (
+                          <span className="ml-1 text-sm font-normal text-muted-foreground">
+                            - {getWaiterName(order)}
+                          </span>
+                        )}
                       </CardTitle>
                       <Badge variant="outline" className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
@@ -225,6 +406,11 @@ export function ChefPage() {
                             ? `Xona #${order.roomNumber}`
                             : `Stol #${order.tableNumber}`
                           : "Yetkazib berish"}
+                        {order.orderType === "table" && (
+                          <span className="ml-1 text-sm font-normal text-muted-foreground">
+                            - {getWaiterName(order)}
+                          </span>
+                        )}
                       </CardTitle>
                       <Badge variant="outline" className="bg-amber-100 text-amber-700">
                         Tayyorlanmoqda
@@ -277,6 +463,11 @@ export function ChefPage() {
                             ? `Xona #${order.roomNumber}`
                             : `Stol #${order.tableNumber}`
                           : "Yetkazib berish"}
+                        {order.orderType === "table" && (
+                          <span className="ml-1 text-sm font-normal text-muted-foreground">
+                            - {getWaiterName(order)}
+                          </span>
+                        )}
                       </CardTitle>
                       <Badge variant="outline" className="bg-green-100 text-green-700">
                         Yakunlangan

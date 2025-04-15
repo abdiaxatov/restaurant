@@ -3,18 +3,19 @@
 import { useState, useEffect, useRef } from "react"
 import { doc, updateDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { AdminLayout } from "@/components/admin/admin-layout"
+import AdminLayout  from "@/components/admin/admin-layout"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { formatCurrency } from "@/lib/utils"
-import { Loader2, CheckCircle, AlertTriangle, History, Bell, BellOff } from "lucide-react"
+import { formatCurrency, getStatusColor, getStatusText } from "@/lib/utils"
+import { Loader2, CheckCircle, AlertTriangle, History, Bell, BellOff, User, CreditCard } from "lucide-react"
 import type { Order } from "@/types"
 import { getDocs as getDocsHelper } from "@/lib/getDocs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/components/admin/admin-auth-provider"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export function WaiterPage() {
   const [preparingOrders, setPreparingOrders] = useState<Order[]>([])
@@ -23,11 +24,45 @@ export function WaiterPage() {
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [assignedTables, setAssignedTables] = useState<number[]>([])
   const [assignedRooms, setAssignedRooms] = useState<number[]>([])
+  const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([])
+  const [waiterFilter, setWaiterFilter] = useState<string>("all")
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
   const auth = useAuth?.() || { user: null }
   const { user } = auth
+
+  useEffect(() => {
+    // Load saved waiter filter from localStorage
+    const savedWaiterFilter = localStorage.getItem("waiterPageFilter")
+    if (savedWaiterFilter) {
+      setWaiterFilter(savedWaiterFilter)
+    }
+
+    // Fetch waiters
+    const fetchWaiters = async () => {
+      try {
+        const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+        const waitersSnapshot = await getDocs(waitersQuery)
+        const waitersList: { id: string; name: string }[] = []
+
+        waitersSnapshot.forEach((doc) => {
+          waitersList.push({ id: doc.id, name: doc.data().name })
+        })
+
+        setWaiters(waitersList)
+      } catch (error) {
+        console.error("Error fetching waiters:", error)
+      }
+    }
+
+    fetchWaiters()
+  }, [])
+
+  // Save waiter filter to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("waiterPageFilter", waiterFilter)
+  }, [waiterFilter])
 
   // Function to fetch assigned tables and rooms
   const fetchAssignedTablesAndRooms = async () => {
@@ -94,6 +129,25 @@ export function WaiterPage() {
 
           return false
         })
+      } else if (waiterFilter !== "all") {
+        // If admin is viewing and has selected a specific waiter
+        filteredPreparingOrders = preparingOrdersData.filter((order) => {
+          if (order.orderType !== "table") return false
+
+          // Check if the order's table or room is assigned to the selected waiter
+          const tablesQuery = query(
+            collection(db, "tables"),
+            where("number", "==", order.tableNumber),
+            where("waiterId", "==", waiterFilter),
+          )
+          const roomsQuery = query(
+            collection(db, "rooms"),
+            where("number", "==", order.roomNumber),
+            where("waiterId", "==", waiterFilter),
+          )
+
+          return tablesQuery.size > 0 || roomsQuery.size > 0
+        })
       }
 
       // Check for new orders to play notification
@@ -105,7 +159,7 @@ export function WaiterPage() {
       setPreparingOrders(filteredPreparingOrders)
 
       // Get completed orders (limit to last 20 for performance)
-      const completedOrdersData = await getDocsHelper("orders", [["status", "==", "completed"]])
+      const completedOrdersData = await getDocsHelper("orders", [["status", "in", ["completed", "paid"]]])
 
       // Filter completed orders based on assigned tables and rooms if user is a waiter
       let filteredCompletedOrders = completedOrdersData
@@ -128,6 +182,25 @@ export function WaiterPage() {
           }
 
           return false
+        })
+      } else if (waiterFilter !== "all") {
+        // If admin is viewing and has selected a specific waiter
+        filteredCompletedOrders = completedOrdersData.filter((order) => {
+          if (order.orderType !== "table") return false
+
+          // Check if the order's table or room is assigned to the selected waiter
+          const tablesQuery = query(
+            collection(db, "tables"),
+            where("number", "==", order.tableNumber),
+            where("waiterId", "==", waiterFilter),
+          )
+          const roomsQuery = query(
+            collection(db, "rooms"),
+            where("number", "==", order.roomNumber),
+            where("waiterId", "==", waiterFilter),
+          )
+
+          return tablesQuery.size > 0 || roomsQuery.size > 0
         })
       }
 
@@ -163,13 +236,14 @@ export function WaiterPage() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [toast, user, assignedTables, assignedRooms])
+  }, [toast, user, assignedTables, assignedRooms, waiterFilter])
 
-  const handleStatusChange = async (orderId: string) => {
+  const handleStatusChange = async (orderId: string, newStatus: string) => {
     try {
       await updateDoc(doc(db, "orders", orderId), {
-        status: "completed",
+        status: newStatus,
         updatedAt: new Date(),
+        ...(newStatus === "paid" ? { isPaid: true, paidAt: new Date() } : {}),
       })
 
       // Play success sound if enabled
@@ -180,7 +254,7 @@ export function WaiterPage() {
 
       toast({
         title: "Status yangilandi",
-        description: "Buyurtma muvaffaqiyatli yakunlandi",
+        description: `Buyurtma muvaffaqiyatli ${newStatus === "paid" ? "to'landi" : "yakunlandi"}`,
       })
 
       // Refresh orders after update
@@ -212,12 +286,36 @@ export function WaiterPage() {
       <div className="flex flex-1 flex-col">
         <div className="border-b bg-white p-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Ofitsiant paneli</h1>
-          <div className="flex items-center gap-2">
-            {soundEnabled ? <Bell className="h-5 w-5 text-green-600" /> : <BellOff className="h-5 w-5 text-gray-400" />}
-            <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} id="sound-mode" />
-            <Label htmlFor="sound-mode" className="text-sm">
-              Ovozli bildirishnoma
-            </Label>
+          <div className="flex items-center gap-4">
+            {user?.role !== "waiter" && (
+              <Select value={waiterFilter} onValueChange={(value) => setWaiterFilter(value)}>
+                <SelectTrigger className="w-[180px]">
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    <SelectValue placeholder="Ofitsiant" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Barcha ofitsiantlar</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={waiter.id}>
+                      {waiter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <div className="flex items-center gap-2">
+              {soundEnabled ? (
+                <Bell className="h-5 w-5 text-green-600" />
+              ) : (
+                <BellOff className="h-5 w-5 text-gray-400" />
+              )}
+              <Switch checked={soundEnabled} onCheckedChange={setSoundEnabled} id="sound-mode" />
+              <Label htmlFor="sound-mode" className="text-sm">
+                Ovozli bildirishnoma
+              </Label>
+            </div>
           </div>
         </div>
 
@@ -309,9 +407,18 @@ export function WaiterPage() {
                           </div>
 
                           <div className="mt-4 flex flex-wrap gap-2">
-                            <Button size="sm" onClick={() => handleStatusChange(order.id!)}>
+                            <Button size="sm" onClick={() => handleStatusChange(order.id!, "completed")}>
                               <CheckCircle className="mr-1 h-4 w-4" />
                               Yetkazildi
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-green-600 hover:text-green-700"
+                              onClick={() => handleStatusChange(order.id!, "paid")}
+                            >
+                              <CreditCard className="mr-1 h-4 w-4" />
+                              To'landi
                             </Button>
                           </div>
                         </div>
@@ -335,12 +442,12 @@ export function WaiterPage() {
                         className="relative overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow"
                       >
                         {/* Status header */}
-                        <div className="bg-green-50 p-3">
+                        <div className={order.status === "paid" ? "bg-green-100 p-3" : "bg-green-50 p-3"}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <CheckCircle className="h-4 w-4 text-green-600" />
-                              <Badge variant="outline" className="bg-green-100 text-green-800">
-                                Yakunlangan
+                              <Badge variant="outline" className={getStatusColor(order.status)}>
+                                {getStatusText(order.status)}
                               </Badge>
                             </div>
                             <div className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</div>
@@ -378,8 +485,25 @@ export function WaiterPage() {
                           </div>
 
                           <div className="mt-2 text-xs text-muted-foreground">
-                            <span className="font-medium">Yakunlangan vaqt:</span> {formatDate(order.updatedAt)}
+                            <span className="font-medium">
+                              {order.status === "paid" ? "To'langan vaqt:" : "Yakunlangan vaqt:"}
+                            </span>{" "}
+                            {formatDate(order.status === "paid" ? order.paidAt : order.updatedAt)}
                           </div>
+
+                          {order.status === "completed" && (
+                            <div className="mt-4">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-green-600 hover:text-green-700 w-full"
+                                onClick={() => handleStatusChange(order.id!, "paid")}
+                              >
+                                <CreditCard className="mr-1 h-4 w-4" />
+                                To'landi deb belgilash
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}

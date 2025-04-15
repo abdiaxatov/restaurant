@@ -58,6 +58,7 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
   const auth = useAuth()
   const user = auth?.user
 
+  // Modify the useEffect hook that fetches tables to filter tables based on user's previous orders
   useEffect(() => {
     // Initialize with empty functions to avoid undefined errors
     let tablesUnsubscribe = () => {}

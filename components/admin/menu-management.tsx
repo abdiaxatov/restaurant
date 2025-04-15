@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { collection, query, orderBy, onSnapshot, doc, deleteDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { AdminLayout } from "@/components/admin/admin-layout"
+import  AdminLayout  from "@/components/admin/admin-layout"
 import { MenuItemForm } from "@/components/menu-item-form"
 import { CategoryManagement } from "@/components/admin/category-management"
 import { Button } from "@/components/ui/button"

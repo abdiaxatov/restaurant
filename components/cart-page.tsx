@@ -1,5 +1,7 @@
 "use client"
 
+import { Badge } from "@/components/ui/badge"
+
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCart } from "@/components/cart-provider"
@@ -26,9 +28,9 @@ import {
   onSnapshot,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { ArrowLeft, Loader2, ShoppingCart, Trash2, AlertTriangle } from "lucide-react"
+import { ArrowLeft, Loader2, ShoppingCart, Trash2, AlertTriangle, Clock, Receipt } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import type { MenuItem } from "@/types"
+import type { MenuItem, Order } from "@/types"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
@@ -47,6 +49,8 @@ export function CartPage() {
   const [deliveryFee, setDeliveryFee] = useState(15000)
   const [containerCost, setContainerCost] = useState(0)
   const [menuItems, setMenuItems] = useState<Record<string, MenuItem>>({})
+  const [previousOrders, setPreviousOrders] = useState<Order[]>([])
+  const [totalFromPreviousOrders, setTotalFromPreviousOrders] = useState(0)
   const router = useRouter()
   const { toast } = useToast()
   // Add state for tracking validation errors
@@ -72,12 +76,16 @@ export function CartPage() {
         if (diffInMinutes <= 20) {
           if (lastOrderInfo.tableNumber) {
             setTableNumber(lastOrderInfo.tableNumber)
+            // Fetch previous orders for this table
+            fetchPreviousOrders(lastOrderInfo.tableNumber, null)
             toast({
               title: "Stol avtomatik tanlandi",
               description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.tableNumber}-stol avtomatik tanlandi.`,
             })
           } else if (lastOrderInfo.roomNumber) {
             setRoomNumber(lastOrderInfo.roomNumber)
+            // Fetch previous orders for this room
+            fetchPreviousOrders(null, lastOrderInfo.roomNumber)
             toast({
               title: "Xona avtomatik tanlandi",
               description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.roomNumber}-xona avtomatik tanlandi.`,
@@ -89,6 +97,45 @@ export function CartPage() {
       console.error("Error checking last order info:", error)
     }
   }, [toast])
+
+  // Fetch previous orders for the selected table/room
+  const fetchPreviousOrders = async (tableNum: number | null, roomNum: number | null) => {
+    if (!tableNum && !roomNum) return
+
+    try {
+      let ordersQuery
+      if (tableNum) {
+        ordersQuery = query(
+          collection(db, "orders"),
+          where("orderType", "==", "table"),
+          where("tableNumber", "==", tableNum),
+          where("status", "!=", "completed"),
+        )
+      } else {
+        ordersQuery = query(
+          collection(db, "orders"),
+          where("orderType", "==", "table"),
+          where("roomNumber", "==", roomNum),
+          where("status", "!=", "completed"),
+        )
+      }
+
+      const ordersSnapshot = await getDocs(ordersQuery)
+      const ordersData: Order[] = []
+      let total = 0
+
+      ordersSnapshot.forEach((doc) => {
+        const orderData = { id: doc.id, ...doc.data() } as Order
+        ordersData.push(orderData)
+        total += orderData.total
+      })
+
+      setPreviousOrders(ordersData)
+      setTotalFromPreviousOrders(total)
+    } catch (error) {
+      console.error("Error fetching previous orders:", error)
+    }
+  }
 
   // Check if there are available tables, rooms and if delivery is available
   useEffect(() => {
@@ -242,6 +289,9 @@ export function CartPage() {
   const handleSelectTableOrRoom = (table: number | null, room: number | null) => {
     setTableNumber(table)
     setRoomNumber(room)
+
+    // Fetch previous orders for this table/room
+    fetchPreviousOrders(table, room)
   }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
@@ -553,6 +603,13 @@ export function CartPage() {
     }
   }
 
+  // Calculate the grand total (current cart + previous orders)
+  const calculateGrandTotal = () => {
+    const currentCartTotal = orderType === "delivery" ? getTotalPrice() + deliveryFee + containerCost : getTotalPrice()
+
+    return currentCartTotal + totalFromPreviousOrders
+  }
+
   // Check if any ordering option is available
   const isOrderingAvailable = hasAvailableTables || hasAvailableRooms || isDeliveryAvailable
 
@@ -628,6 +685,57 @@ export function CartPage() {
                 </AnimatePresence>
               </CardContent>
             </Card>
+
+            {/* Previous orders from the same table */}
+            {orderType === "table" && previousOrders.length > 0 && (
+              <Card className="mt-4 border-amber-200 bg-amber-50">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center text-amber-800">
+                    <Receipt className="mr-2 h-5 w-5" />
+                    Shu stoldan avvalgi buyurtmalar
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {previousOrders.map((order, index) => (
+                      <div key={index} className="flex items-center justify-between rounded-md bg-white p-2 shadow-sm">
+                        <div>
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">
+                              {order.createdAt?.toDate
+                                ? new Date(order.createdAt.toDate()).toLocaleString("uz-UZ", {
+                                    dateStyle: "short",
+                                    timeStyle: "short",
+                                  })
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-sm">
+                            {order.items.map((item, i) => (
+                              <span key={i} className="mr-1">
+                                {item.name} x{item.quantity}
+                                {i < order.items.length - 1 ? "," : ""}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <Badge variant="outline" className="mb-1 bg-white">
+                            {order.status === "pending"
+                              ? "Kutilmoqda"
+                              : order.status === "preparing"
+                                ? "Tayyorlanmoqda"
+                                : "Yakunlangan"}
+                          </Badge>
+                          <div className="font-medium">{formatCurrency(order.total)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="md:col-span-2">
@@ -797,11 +905,30 @@ export function CartPage() {
                       </>
                     )}
 
+                    {/* Show previous orders total if available */}
+                    {orderType === "table" && previousOrders.length > 0 && (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Joriy buyurtma:</span>
+                          <span>{formatCurrency(getTotalPrice())}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Avvalgi buyurtmalar:</span>
+                          <span>{formatCurrency(totalFromPreviousOrders)}</span>
+                        </div>
+                        <Separator className="my-2" />
+                      </>
+                    )}
+
                     <div className="flex items-center justify-between font-medium">
                       <span>Jami summa:</span>
                       <span className="text-lg text-primary">
                         {formatCurrency(
-                          orderType === "delivery" ? getTotalPrice() + deliveryFee + containerCost : getTotalPrice(),
+                          orderType === "table" && previousOrders.length > 0
+                            ? calculateGrandTotal()
+                            : orderType === "delivery"
+                              ? getTotalPrice() + deliveryFee + containerCost
+                              : getTotalPrice(),
                         )}
                       </span>
                     </div>
