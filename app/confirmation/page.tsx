@@ -1,205 +1,188 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
-import { CheckCircle, ArrowLeft, Clock, Loader2, ChefHat, Utensils } from "lucide-react"
+import { ViewMyOrdersButton } from "@/components/view-my-orders-button"
+import Link from "next/link"
 import { motion } from "framer-motion"
 import type { Order } from "@/types"
 
 export default function ConfirmationPage() {
-  const [order, setOrder] = useState<Order | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const router = useRouter()
   const searchParams = useSearchParams()
   const orderId = searchParams.get("orderId")
+  const [order, setOrder] = useState<Order | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!orderId) {
-      router.push("/")
-      return
-    }
-
     const fetchOrder = async () => {
+      if (!orderId) {
+        setError("Buyurtma ID topilmadi")
+        setLoading(false)
+        return
+      }
+
       try {
         const orderDoc = await getDoc(doc(db, "orders", orderId))
-
         if (orderDoc.exists()) {
           setOrder({ id: orderDoc.id, ...orderDoc.data() } as Order)
+
+          // Store the order timestamp and table/room number in localStorage
+          const orderData = orderDoc.data()
+          const orderTime = orderData.createdAt?.toDate?.() || new Date()
+
+          if (orderData.tableNumber || orderData.roomNumber) {
+            localStorage.setItem(
+              "lastOrderInfo",
+              JSON.stringify({
+                timestamp: orderTime.getTime(),
+                tableNumber: orderData.tableNumber,
+                roomNumber: orderData.roomNumber,
+              }),
+            )
+          }
         } else {
-          router.push("/")
+          setError("Buyurtma topilmadi")
         }
       } catch (error) {
         console.error("Error fetching order:", error)
+        setError("Buyurtmani yuklashda xatolik yuz berdi")
       } finally {
-        setIsLoading(false)
+        setLoading(false)
       }
     }
 
     fetchOrder()
-  }, [orderId, router])
+  }, [orderId])
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "pending":
-        return <Clock className="h-5 w-5 text-amber-500" />
-      case "preparing":
-        return <ChefHat className="h-5 w-5 text-blue-500" />
-      case "ready":
-        return <Utensils className="h-5 w-5 text-green-500" />
-      case "completed":
-        return <CheckCircle className="h-5 w-5 text-green-700" />
-      default:
-        return <Clock className="h-5 w-5 text-gray-500" />
-    }
-  }
+  // Play success sound on component mount
+  useEffect(() => {
+    const audio = new Audio("/success.mp3")
+    audio.play().catch((e) => console.error("Error playing sound:", e))
+  }, [])
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "Kutilmoqda"
-      case "preparing":
-        return "Tayyorlanmoqda"
-      case "ready":
-        return "Tayyor"
-      case "completed":
-        return "Yakunlangan"
-      default:
-        return status
-    }
-  }
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">Buyurtma ma'lumotlari yuklanmoqda...</p>
+      <div className="container mx-auto flex h-[80vh] max-w-md items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-primary" />
+          <p>Buyurtma ma'lumotlari yuklanmoqda...</p>
+        </div>
       </div>
     )
   }
 
-  if (!order) {
+  if (error || !order) {
     return (
-      <div className="container mx-auto max-w-md p-4">
-        <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.push("/")}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Menyuga qaytish
-        </Button>
-
-        <div className="rounded-lg border p-6 text-center">
-          <p className="text-muted-foreground">Buyurtma topilmadi</p>
-          <Button className="mt-4" onClick={() => router.push("/")}>
-            Menyuga qaytish
-          </Button>
-        </div>
+      <div className="container mx-auto flex h-[80vh] max-w-md items-center justify-center">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-center text-red-500">Xatolik</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center">{error || "Buyurtma ma'lumotlarini yuklashda xatolik yuz berdi"}</p>
+          </CardContent>
+          <CardFooter className="flex justify-center">
+            <Button asChild>
+              <Link href="/">Bosh sahifaga qaytish</Link>
+            </Button>
+          </CardFooter>
+        </Card>
       </div>
     )
   }
 
   return (
     <div className="container mx-auto max-w-md p-4">
-      <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.push("/")}>
-        <ArrowLeft className="mr-2 h-4 w-4" />
-        Menyuga qaytish
-      </Button>
-
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.5 }}
-        className="rounded-lg border p-6"
       >
-        <div className="mb-4 flex justify-center">
-          {order.status === "completed" ? (
-            <CheckCircle className="h-16 w-16 text-green-500" />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-              {getStatusIcon(order.status)}
-            </div>
-          )}
-        </div>
-
-        <h1 className="mb-2 text-center text-2xl font-bold">
-          {order.status === "completed" ? "Buyurtma yakunlandi!" : "Buyurtma qabul qilindi!"}
-        </h1>
-        <p className="mb-6 text-center text-muted-foreground">
-          {order.status === "pending" && "Sizning buyurtmangiz qabul qilindi va tez orada tayyorlanadi."}
-          {order.status === "preparing" && "Sizning buyurtmangiz hozirda tayyorlanmoqda."}
-          {order.status === "ready" && "Sizning buyurtmangiz tayyor va yetkazib berilishi kutilmoqda."}
-          {order.status === "completed" && "Sizning buyurtmangiz muvaffaqiyatli yakunlandi."}
-        </p>
-
-        <div className="mb-6 flex items-center justify-center gap-4">
-          {order.orderType === "table" && (
-            <>
-              <div className="text-center">
-                <p className="text-sm text-muted-foreground">Stol raqami</p>
-                <p className="text-xl font-semibold">{order.tableNumber}</p>
-              </div>
-
-              <Separator orientation="vertical" className="h-10" />
-            </>
-          )}
-
-          <div className="text-center">
-            <p className="text-sm text-muted-foreground">Buyurtma holati</p>
-            <div className="flex items-center justify-center gap-1">
-              {getStatusIcon(order.status)}
-              <p className="font-medium capitalize">{getStatusText(order.status)}</p>
-            </div>
+        <Card className="overflow-hidden">
+          <div className="bg-primary p-6 text-center text-primary-foreground">
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20, delay: 0.2 }}
+            >
+              <CheckCircle2 className="mx-auto mb-4 h-16 w-16" />
+            </motion.div>
+            <h1 className="mb-2 text-2xl font-bold">Buyurtmangiz qabul qilindi!</h1>
+            <p>Buyurtma raqami: #{order.id?.substring(0, 6)}</p>
           </div>
-        </div>
 
-        <Separator className="my-4" />
+          <CardHeader>
+            <CardTitle>Buyurtma tafsilotlari</CardTitle>
+          </CardHeader>
 
-        <div className="mb-4 space-y-2 text-left">
-          <h2 className="font-semibold">Buyurtma tafsilotlari</h2>
-          {order.items.map((item, index) => (
-            <div key={index} className="flex justify-between text-sm">
-              <span>
-                {item.name} × {item.quantity}
-              </span>
-              <span>{formatCurrency(item.price * item.quantity)}</span>
+          <CardContent className="space-y-4">
+            <div>
+              <h3 className="mb-2 font-medium">Buyurtma turi</h3>
+              {order.orderType === "table" ? (
+                <p>
+                  {order.tableNumber
+                    ? `Stol buyurtmasi (Stol #${order.tableNumber})`
+                    : order.roomNumber
+                      ? `Xona buyurtmasi (Xona #${order.roomNumber})`
+                      : "Stol buyurtmasi"}
+                </p>
+              ) : (
+                <p>Yetkazib berish</p>
+              )}
             </div>
-          ))}
 
-          {order.orderType === "delivery" && (
-            <>
-              <div className="flex justify-between pt-2 text-sm">
-                <span>Taomlar narxi</span>
-                <span>{formatCurrency(order.subtotal || order.total)}</span>
+            {order.orderType === "delivery" && (
+              <>
+                <div>
+                  <h3 className="mb-2 font-medium">Telefon raqami</h3>
+                  <p>{order.phoneNumber}</p>
+                </div>
+                <div>
+                  <h3 className="mb-2 font-medium">Manzil</h3>
+                  <p>{order.address}</p>
+                </div>
+              </>
+            )}
+
+            <div>
+              <h3 className="mb-2 font-medium">Buyurtma elementlari</h3>
+              <ul className="space-y-2">
+                {order.items.map((item, index) => (
+                  <li key={index} className="flex justify-between">
+                    <span>
+                      {item.name} x {item.quantity}
+                    </span>
+                    <span>{formatCurrency(item.price * item.quantity)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-lg bg-muted p-3">
+              <div className="flex justify-between">
+                <span>Jami:</span>
+                <span>{formatCurrency(order.total)}</span>
               </div>
-              {order.containerCost > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Idishlar narxi</span>
-                  <span>{formatCurrency(order.containerCost)}</span>
-                </div>
-              )}
-              {order.deliveryFee > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Yetkazib berish narxi</span>
-                  <span>{formatCurrency(order.deliveryFee)}</span>
-                </div>
-              )}
-            </>
-          )}
+            </div>
+          </CardContent>
 
-          <div className="flex justify-between pt-2 font-medium">
-            <span>Jami</span>
-            <span>{formatCurrency(order.total)}</span>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <Button onClick={() => router.push("/my-orders")}>Buyurtmalarimni ko'rish</Button>
-          <Button variant="outline" onClick={() => router.push("/")}>
-            Yana buyurtma berish
-          </Button>
-        </div>
+          <CardFooter className="flex flex-col space-y-2">
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Menyuga qaytish
+              </Link>
+            </Button>
+            <ViewMyOrdersButton className="w-full" />
+          </CardFooter>
+        </Card>
       </motion.div>
     </div>
   )

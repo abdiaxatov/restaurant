@@ -6,10 +6,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, Loader2, Home } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { collection, query, onSnapshot, where, getDocs } from "firebase/firestore"
+import { collection, query, onSnapshot, where, getDocs, doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+// Define useAuth outside the try-catch block
+let useAuth: any = () => ({ user: null })
+
+try {
+  // Try to dynamically import the useAuth hook
+  const adminAuthProvider = require("@/components/admin/admin-auth-provider")
+  if (adminAuthProvider && typeof adminAuthProvider.useAuth === "function") {
+    useAuth = adminAuthProvider.useAuth
+  }
+} catch (error) {
+  console.log("Admin auth provider not available in this context")
+}
 
 interface TableSelectorProps {
   selectedTable: number | null
@@ -42,6 +55,8 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
   const [viewingRoom, setViewingRoom] = useState<RoomData | null>(null)
   const [tablesInSelectedRoom, setTablesInSelectedRoom] = useState<TableData[]>([])
   const { toast } = useToast()
+  const auth = useAuth()
+  const user = auth?.user
 
   useEffect(() => {
     // Initialize with empty functions to avoid undefined errors
@@ -50,8 +65,63 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
 
     const fetchData = async () => {
       try {
-        // Fetch tables from Firestore - use separate queries to avoid index requirements
-        const tablesQuery = query(collection(db, "tables"), where("status", "==", "available"))
+        // Get the user's previous orders from localStorage
+        const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+        let lastSelectedTable = null
+        let lastSelectedRoom = null
+
+        // Agar oxirgi buyurtma ma'lumotlari saqlangan bo'lsa
+        if (lastOrderInfoStr) {
+          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+          if (lastOrderInfo.tableNumber) {
+            lastSelectedTable = lastOrderInfo.tableNumber
+          } else if (lastOrderInfo.roomNumber) {
+            lastSelectedRoom = lastOrderInfo.roomNumber
+          }
+        }
+
+        // Fetch previous orders to get tables/rooms the user has ordered from
+        const userPreviousTables = new Set<number>()
+        const userPreviousRooms = new Set<number>()
+
+        if (myOrders.length > 0) {
+          // Fetch order details to get table/room numbers
+          for (const orderId of myOrders) {
+            try {
+              const orderDoc = await getDoc(doc(db, "orders", orderId))
+              if (orderDoc.exists()) {
+                const orderData = orderDoc.data()
+                if (orderData.tableNumber) userPreviousTables.add(orderData.tableNumber)
+                if (orderData.roomNumber) userPreviousRooms.add(orderData.roomNumber)
+              }
+            } catch (error) {
+              console.error("Error fetching order:", error)
+            }
+          }
+        }
+
+        // Agar avval tanlangan stol/xona bo'lsa, uni avtomatik tanlash
+        if (lastSelectedTable && !selectedTable) {
+          onSelectTable(lastSelectedTable, null)
+        } else if (lastSelectedRoom && !selectedRoom) {
+          onSelectTable(null, lastSelectedRoom)
+        }
+
+        // Fetch tables from Firestore
+        let tablesQuery
+
+        if (user && user.role === "waiter") {
+          // If user is a waiter, only show tables assigned to them
+          tablesQuery = query(
+            collection(db, "tables"),
+            where("status", "==", "available"),
+            where("waiterId", "==", user.id),
+          )
+        } else {
+          // For admin, chef, and customers, show all available tables
+          tablesQuery = query(collection(db, "tables"), where("status", "==", "available"))
+        }
 
         tablesUnsubscribe = onSnapshot(
           tablesQuery,
@@ -61,9 +131,36 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
               tablesData.push({ id: doc.id, ...doc.data() } as TableData)
             })
 
-            // Sort tables by number after fetching
-            tablesData.sort((a, b) => a.number - b.number)
-            setTables(tablesData)
+            // Also fetch occupied tables that the user has previously ordered from
+            if (userPreviousTables.size > 0) {
+              const fetchOccupiedTables = async () => {
+                try {
+                  const occupiedTablesQuery = query(collection(db, "tables"), where("status", "==", "occupied"))
+                  const occupiedTablesSnapshot = await getDocs(occupiedTablesQuery)
+
+                  occupiedTablesSnapshot.forEach((doc) => {
+                    const tableData = doc.data() as TableData
+                    // Only add tables the user has previously ordered from
+                    if (userPreviousTables.has(tableData.number)) {
+                      tablesData.push({ id: doc.id, ...tableData })
+                    }
+                  })
+
+                  // Sort tables by number after fetching all tables
+                  tablesData.sort((a, b) => a.number - b.number)
+                  setTables(tablesData)
+                } catch (error) {
+                  console.error("Error fetching occupied tables:", error)
+                }
+              }
+
+              fetchOccupiedTables()
+            } else {
+              // Sort tables by number after fetching
+              tablesData.sort((a, b) => a.number - b.number)
+              setTables(tablesData)
+            }
+
             setIsLoading(false)
           },
           (error) => {
@@ -77,8 +174,16 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
           },
         )
 
-        // Fetch rooms from Firestore
-        const roomsQuery = query(collection(db, "rooms"))
+        // Fetch rooms from Firestore with similar logic for previously ordered rooms
+        let roomsQuery
+
+        if (user && user.role === "waiter") {
+          // If user is a waiter, only show rooms assigned to them
+          roomsQuery = query(collection(db, "rooms"), where("waiterId", "==", user.id))
+        } else {
+          // For admin and chef, show all rooms
+          roomsQuery = query(collection(db, "rooms"))
+        }
 
         roomsUnsubscribe = onSnapshot(
           roomsQuery,
@@ -88,12 +193,38 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
               roomsData.push({ id: doc.id, ...doc.data() } as RoomData)
             })
 
-            // Sort rooms by number
-            roomsData.sort((a, b) => a.number - b.number)
+            // Also fetch occupied rooms that the user has previously ordered from
+            if (userPreviousRooms.size > 0) {
+              const fetchOccupiedRooms = async () => {
+                try {
+                  const occupiedRoomsQuery = query(collection(db, "rooms"), where("status", "==", "occupied"))
+                  const occupiedRoomsSnapshot = await getDocs(occupiedRoomsQuery)
 
-            // Filter out occupied rooms
-            const availableRooms = roomsData.filter((room) => !room.status || room.status === "available")
-            setRooms(availableRooms)
+                  occupiedRoomsSnapshot.forEach((doc) => {
+                    const roomData = doc.data() as RoomData
+                    // Only add rooms the user has previously ordered from
+                    if (userPreviousRooms.has(roomData.number)) {
+                      roomsData.push({ id: doc.id, ...roomData })
+                    }
+                  })
+
+                  // Sort rooms by number
+                  roomsData.sort((a, b) => a.number - b.number)
+                  setRooms(roomsData)
+                } catch (error) {
+                  console.error("Error fetching occupied rooms:", error)
+                }
+              }
+
+              fetchOccupiedRooms()
+            } else {
+              // Sort rooms by number
+              roomsData.sort((a, b) => a.number - b.number)
+
+              // Filter out occupied rooms that the user hasn't ordered from before
+              const availableRooms = roomsData.filter((room) => !room.status || room.status === "available")
+              setRooms(availableRooms)
+            }
           },
           (error) => {
             console.error("Error fetching rooms:", error)
@@ -120,7 +251,7 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
         console.error("Error unsubscribing:", error)
       }
     }
-  }, [toast])
+  }, [toast, user, auth])
 
   // When a room is selected for viewing, fetch tables in that room
   useEffect(() => {
@@ -267,14 +398,23 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                   tables.map((table) => (
                     <Card
                       key={table.id}
-                      className="cursor-pointer transition-all hover:bg-muted"
+                      className={`cursor-pointer transition-all hover:bg-muted ${
+                        table.status === "occupied" ? "border-amber-500" : ""
+                      }`}
                       onClick={() => handleSelectTable(table.number)}
                     >
                       <CardContent className="p-4">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center justify-between">
                             <span className="text-lg font-medium">{table.number} stol</span>
-                            <Badge variant="outline">{table.seats} kishilik</Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline">{table.seats} kishilik</Badge>
+                              {table.status === "occupied" && (
+                                <Badge variant="secondary" className="bg-amber-100 text-amber-800">
+                                  Band
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </CardContent>
@@ -295,14 +435,23 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                   rooms.map((room) => (
                     <Card
                       key={room.id}
-                      className="cursor-pointer transition-all hover:bg-muted"
+                      className={`cursor-pointer transition-all hover:bg-muted ${
+                        room.status === "occupied" ? "border-amber-500" : ""
+                      }`}
                       onClick={() => handleSelectRoom(room)}
                     >
                       <CardContent className="p-4">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center justify-between">
                             <span className="text-lg font-medium">{room.number} xona</span>
-                            <Badge variant="outline">{room.capacity} kishilik</Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline">{room.capacity} kishilik</Badge>
+                              {room.status === "occupied" && (
+                                <Badge variant="secondary" className="bg-amber-100 text-amber-800">
+                                  Band
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </CardContent>

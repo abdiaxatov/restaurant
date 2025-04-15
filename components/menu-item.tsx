@@ -10,6 +10,10 @@ import { formatCurrency } from "@/lib/utils"
 import { Minus, Plus, Trash2, ShoppingCart } from "lucide-react"
 import type { MenuItem as MenuItemType } from "@/types"
 import { motion, AnimatePresence } from "framer-motion"
+import { useToast } from "@/components/ui/use-toast"
+import { doc, getDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import type { MenuItem } from "@/types"
 
 interface MenuItemProps {
   item: MenuItemType
@@ -20,6 +24,7 @@ export function MenuItem({ item }: MenuItemProps) {
   const [quantity, setQuantity] = useState(0)
   const [isInCart, setIsInCart] = useState(false)
   const cartQuantity = getItemQuantity(item.id)
+  const { toast } = useToast()
 
   useEffect(() => {
     setIsInCart(cartQuantity > 0)
@@ -38,8 +43,37 @@ export function MenuItem({ item }: MenuItemProps) {
     setIsInCart(true)
   }
 
-  const handleIncrement = () => {
-    // Play sound notification
+  const handleIncrement = async () => {
+    // Mahsulotning hozirgi qolgan miqdorini tekshirish
+    try {
+      const menuItemRef = doc(db, "menuItems", item.id)
+      const menuItemSnap = await getDoc(menuItemRef)
+
+      if (menuItemSnap.exists()) {
+        const menuItemData = menuItemSnap.data() as MenuItem
+        const remainingServings =
+          menuItemData.remainingServings !== undefined ? menuItemData.remainingServings : menuItemData.servesCount
+
+        // Agar qo'shiladigan miqdor qolgan miqdordan ko'p bo'lsa, xatolik chiqarish
+        if (quantity + 1 > remainingServings) {
+          // Xatolik tovushini ijro etish
+          const audio = new Audio("/notification.mp3")
+          audio.play().catch((e) => console.error("Error playing sound:", e))
+
+          // Xatolik xabarini ko'rsatish
+          toast({
+            title: "Yetarli porsiya yo'q",
+            description: `Kechirasiz, ${item.name} taomidan faqat ${remainingServings} porsiya qolgan.`,
+            variant: "destructive",
+          })
+          return
+        }
+      }
+    } catch (error) {
+      console.error("Error checking remaining servings:", error)
+    }
+
+    // Tovush ijro etish
     const audio = new Audio("/click.mp3")
     audio.play().catch((e) => console.error("Error playing sound:", e))
 

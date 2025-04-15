@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { doc, updateDoc } from "firebase/firestore"
+import { doc, updateDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { useToast } from "@/components/ui/use-toast"
@@ -10,37 +10,128 @@ import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
 import { Loader2, CheckCircle, AlertTriangle, History, Bell, BellOff } from "lucide-react"
 import type { Order } from "@/types"
-import { getDocs } from "@/lib/getDocs"
+import { getDocs as getDocsHelper } from "@/lib/getDocs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { useAuth } from "@/components/admin/admin-auth-provider"
 
 export function WaiterPage() {
   const [preparingOrders, setPreparingOrders] = useState<Order[]>([])
   const [completedOrders, setCompletedOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [assignedTables, setAssignedTables] = useState<number[]>([])
+  const [assignedRooms, setAssignedRooms] = useState<number[]>([])
   const { toast } = useToast()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previousOrderCountRef = useRef(0)
+  const auth = useAuth?.() || { user: null }
+  const { user } = auth
+
+  // Function to fetch assigned tables and rooms
+  const fetchAssignedTablesAndRooms = async () => {
+    if (!user) return
+
+    try {
+      // Fetch tables assigned to this waiter
+      const tablesQuery = query(collection(db, "tables"), where("waiterId", "==", user.id))
+      const tablesSnapshot = await getDocs(tablesQuery)
+      const tableNumbers: number[] = []
+
+      tablesSnapshot.forEach((doc) => {
+        const tableData = doc.data()
+        if (tableData.number) {
+          tableNumbers.push(tableData.number)
+        }
+      })
+
+      setAssignedTables(tableNumbers)
+
+      // Fetch rooms assigned to this waiter
+      const roomsQuery = query(collection(db, "rooms"), where("waiterId", "==", user.id))
+      const roomsSnapshot = await getDocs(roomsQuery)
+      const roomNumbers: number[] = []
+
+      roomsSnapshot.forEach((doc) => {
+        const roomData = doc.data()
+        if (roomData.number) {
+          roomNumbers.push(roomData.number)
+        }
+      })
+
+      setAssignedRooms(roomNumbers)
+    } catch (error) {
+      console.error("Error fetching assigned tables and rooms:", error)
+    }
+  }
 
   // Function to fetch orders
   const fetchOrders = async () => {
     try {
       // Get preparing orders
-      const preparingOrdersData = await getDocs("orders", [["status", "==", "preparing"]])
+      const preparingOrdersData = await getDocsHelper("orders", [["status", "==", "preparing"]])
+
+      // Filter orders based on assigned tables and rooms if user is a waiter
+      let filteredPreparingOrders = preparingOrdersData
+
+      if (user && user.role === "waiter") {
+        filteredPreparingOrders = preparingOrdersData.filter((order) => {
+          // Include orders for assigned tables
+          if (order.tableNumber && assignedTables.includes(order.tableNumber)) {
+            return true
+          }
+
+          // Include orders for assigned rooms
+          if (order.roomNumber && assignedRooms.includes(order.roomNumber)) {
+            return true
+          }
+
+          // Include delivery orders if no table/room is specified
+          if (order.orderType === "delivery") {
+            return true
+          }
+
+          return false
+        })
+      }
 
       // Check for new orders to play notification
-      if (preparingOrdersData.length > previousOrderCountRef.current && soundEnabled) {
+      if (filteredPreparingOrders.length > previousOrderCountRef.current && soundEnabled) {
         audioRef.current?.play().catch((e) => console.error("Error playing notification sound:", e))
       }
 
-      previousOrderCountRef.current = preparingOrdersData.length
-      setPreparingOrders(preparingOrdersData)
+      previousOrderCountRef.current = filteredPreparingOrders.length
+      setPreparingOrders(filteredPreparingOrders)
 
       // Get completed orders (limit to last 20 for performance)
-      const completedOrdersData = await getDocs("orders", [["status", "==", "completed"]])
-      setCompletedOrders(completedOrdersData.slice(0, 20)) // Limit to last 20 orders
+      const completedOrdersData = await getDocsHelper("orders", [["status", "==", "completed"]])
+
+      // Filter completed orders based on assigned tables and rooms if user is a waiter
+      let filteredCompletedOrders = completedOrdersData
+
+      if (user && user.role === "waiter") {
+        filteredCompletedOrders = completedOrdersData.filter((order) => {
+          // Include orders for assigned tables
+          if (order.tableNumber && assignedTables.includes(order.tableNumber)) {
+            return true
+          }
+
+          // Include orders for assigned rooms
+          if (order.roomNumber && assignedRooms.includes(order.roomNumber)) {
+            return true
+          }
+
+          // Include delivery orders if no table/room is specified
+          if (order.orderType === "delivery") {
+            return true
+          }
+
+          return false
+        })
+      }
+
+      setCompletedOrders(filteredCompletedOrders.slice(0, 20)) // Limit to last 20 orders
 
       setIsLoading(false)
     } catch (error) {
@@ -58,6 +149,9 @@ export function WaiterPage() {
     // Initialize audio element
     audioRef.current = new Audio("/notification.mp3")
 
+    // Fetch assigned tables and rooms
+    fetchAssignedTablesAndRooms()
+
     // Initial fetch
     fetchOrders()
 
@@ -69,7 +163,7 @@ export function WaiterPage() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [toast])
+  }, [toast, user, assignedTables, assignedRooms])
 
   const handleStatusChange = async (orderId: string) => {
     try {
