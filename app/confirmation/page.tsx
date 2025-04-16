@@ -146,7 +146,7 @@ export default function ConfirmationPage() {
 
           <CardContent className="space-y-4">
             <div>
-              <h3 className="mb-2 font-medium">Buyurtma turi</h3>
+              <h3 className="mb-2 font-medium">Buyurtma joyi</h3>
               <p>{getSeatingDisplay(order)}</p>
             </div>
 
@@ -159,9 +159,11 @@ export default function ConfirmationPage() {
               </div>
             )}
 
+            
+
             {waiterName && (
               <div>
-                <h3 className="mb-2 font-medium">Ofitsiant</h3>
+                <h3 className="mb-2 font-medium">Hizmat ko'ruvchi</h3>
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4 text-muted-foreground" />
                   <p>{waiterName}</p>
@@ -183,7 +185,7 @@ export default function ConfirmationPage() {
             )}
 
             <div>
-              <h3 className="mb-2 font-medium">Buyurtma elementlari</h3>
+              <h3 className="mb-2 font-medium">Buyurtma ma'lumotlari</h3>
               <ul className="space-y-2">
                 {order.items.map((item, index) => (
                   <li key={index} className="flex justify-between">

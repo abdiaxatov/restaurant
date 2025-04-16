@@ -57,7 +57,25 @@ export function CartPage() {
     address?: boolean
   }>({})
   const [waiterId, setWaiterId] = useState<string | null>(null)
-  const [orderData, setOrderData] = useState<any>({})
+  const [orderData, setOrderData] = useState<{
+    waiterId?: string
+    orderType: "table" | "delivery"
+    tableNumber: number | null
+    roomNumber: number | null
+    seatingType: string | null
+    phoneNumber: string | null
+    address: string | null
+    items: any[]
+    subtotal: number
+    deliveryFee: number
+    containerCost: number
+    total: number
+    status: string
+    isPaid: boolean
+    createdAt?: any
+    userSignature: string
+    userRecentlyUsed?: boolean
+  }>({})
   const [selectedTable, setSelectedTable] = useState<number | null>(null)
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null)
   const [selectedTableType, setSelectedTableType] = useState<string | null>(null)
@@ -379,7 +397,7 @@ export function CartPage() {
         let success = true
 
         // Only mark as occupied if not already in use by this user
-        if (!orderData.userRecentlyUsed) {
+        if (!orderData?.userRecentlyUsed) {
           if (roomNumber) {
             success = await markSeatingItemAsOccupied(roomNumber, "Xona")
           } else if (tableNumber && seatingType) {
@@ -422,7 +440,7 @@ export function CartPage() {
         }
       })
 
-      const orderData = {
+      const newOrderData = {
         orderType,
         tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
         roomNumber: orderType === "table" && roomNumber ? roomNumber : null,
@@ -442,7 +460,7 @@ export function CartPage() {
       }
 
       // Also add a debug log to check the final order data
-      console.log("Order data being submitted:", orderData)
+      console.log("Order data being submitted:", newOrderData)
 
       // Add code to get the waiterId from the seating item and include it in the order
       if (orderType === "table") {
@@ -483,7 +501,7 @@ export function CartPage() {
       }
 
       // Add order to Firestore
-      const docRef = await addDoc(collection(db, "orders"), orderData)
+      const docRef = await addDoc(collection(db, "orders"), newOrderData)
 
       // Oxirgi tanlangan joy ma'lumotlarini saqlash
       if (orderType === "table") {

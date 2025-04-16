@@ -174,6 +174,8 @@ export function OrderHistory() {
       case "ready":
         return <Utensils className="h-5 w-5 text-green-500" />
       case "completed":
+        return <Utensils className="h-5 w-5 text-blue-500" />
+      case "paid":
         return <CheckCircle className="h-5 w-5 text-green-700" />
       default:
         return <Clock className="h-5 w-5 text-gray-500" />
@@ -190,6 +192,8 @@ export function OrderHistory() {
         return "Tayyor"
       case "completed":
         return "Yakunlangan"
+        case "paid":
+        return "To'langan"
       default:
         return status
     }

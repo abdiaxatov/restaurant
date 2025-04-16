@@ -179,7 +179,7 @@ export default function ReceiptPage() {
                   <div className="flex items-start gap-2">
                     <User className="mt-0.5 h-4 w-4 text-muted-foreground" />
                     <div>
-                      <div className="font-medium">Ofitsiant:</div>
+                      <div className="font-medium">Hizmat ko'rsatuvchi:</div>
                       <div>{order.waiterName}</div>
                     </div>
                   </div>
