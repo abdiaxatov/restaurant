@@ -1,10 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react"
+import { Loader2, CheckCircle2, ArrowLeft, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
@@ -12,13 +12,29 @@ import { ViewMyOrdersButton } from "@/components/view-my-orders-button"
 import Link from "next/link"
 import { motion } from "framer-motion"
 import type { Order } from "@/types"
+import { getWaiterNameById } from "@/lib/table-service"
+import { getSeatingTypeDisplay } from "@/lib/receipt-service"
+import { Badge } from "@/components/ui/badge"
 
 export default function ConfirmationPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const orderId = searchParams.get("orderId")
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [waiterName, setWaiterName] = useState<string | null>(null)
+
+  const getSeatingDisplay = (order: Order) => {
+    const type = getSeatingTypeDisplay(order)
+
+    if (order.orderType === "delivery") {
+      return type
+    }
+
+    const number = order.roomNumber || order.tableNumber
+    return `${type} ${number}`
+  }
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -31,10 +47,16 @@ export default function ConfirmationPage() {
       try {
         const orderDoc = await getDoc(doc(db, "orders", orderId))
         if (orderDoc.exists()) {
-          setOrder({ id: orderDoc.id, ...orderDoc.data() } as Order)
+          const orderData = { id: orderDoc.id, ...orderDoc.data() } as Order
+          setOrder(orderData)
+
+          // Fetch waiter name if waiterId exists
+          if (orderData.waiterId) {
+            const name = await getWaiterNameById(orderData.waiterId)
+            setWaiterName(name)
+          }
 
           // Store the order timestamp and table/room number in localStorage
-          const orderData = orderDoc.data()
           const orderTime = orderData.createdAt?.toDate?.() || new Date()
 
           if (orderData.tableNumber || orderData.roomNumber) {
@@ -125,18 +147,27 @@ export default function ConfirmationPage() {
           <CardContent className="space-y-4">
             <div>
               <h3 className="mb-2 font-medium">Buyurtma turi</h3>
-              {order.orderType === "table" ? (
-                <p>
-                  {order.tableNumber
-                    ? `Stol buyurtmasi (Stol #${order.tableNumber})`
-                    : order.roomNumber
-                      ? `Xona buyurtmasi (Xona #${order.roomNumber})`
-                      : "Stol buyurtmasi"}
-                </p>
-              ) : (
-                <p>Yetkazib berish</p>
-              )}
+              <p>{getSeatingDisplay(order)}</p>
             </div>
+
+            {order.isPaid && (
+              <div className="mt-2">
+                <h3 className="mb-2 font-medium">To'lov holati</h3>
+                <Badge variant="outline" className="bg-green-50 text-green-600">
+                  To'langan
+                </Badge>
+              </div>
+            )}
+
+            {waiterName && (
+              <div>
+                <h3 className="mb-2 font-medium">Ofitsiant</h3>
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  <p>{waiterName}</p>
+                </div>
+              </div>
+            )}
 
             {order.orderType === "delivery" && (
               <>
@@ -174,6 +205,11 @@ export default function ConfirmationPage() {
           </CardContent>
 
           <CardFooter className="flex flex-col space-y-2">
+            {order.isPaid && (
+              <Button className="w-full" onClick={() => router.push(`/receipt?orderId=${order.id}`)}>
+                Chekni ko'rish
+              </Button>
+            )}
             <Button asChild variant="outline" className="w-full">
               <Link href="/">
                 <ArrowLeft className="mr-2 h-4 w-4" />

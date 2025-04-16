@@ -19,7 +19,7 @@ import {
   Timestamp,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import AdminLayout  from "@/components/admin/admin-layout"
+import AdminLayout from "@/components/admin/admin-layout"
 import { OrderDetails } from "@/components/admin/order-details"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -46,6 +46,9 @@ import {
   XCircle,
   PieChart,
   Info,
+  Trash2,
+  TableIcon,
+  X,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -105,6 +108,9 @@ export function AdminDashboard() {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false)
   const [selectedStatusForModal, setSelectedStatusForModal] = useState<string | null>(null)
   const [ordersByType, setOrdersByType] = useState<{ name: string; value: number; color: string }[]>([])
+  const [seatingTypeFilter, setSeatingTypeFilter] = useState<string | null>(null)
+  const [seatingNumberFilter, setSeatingNumberFilter] = useState<number | null>(null)
+  const [seatingTypes, setSeatingTypes] = useState<string[]>([])
 
   const STATUS_COLORS = {
     pending: "#FFBB28",
@@ -178,6 +184,25 @@ export function AdminDashboard() {
       orderBy("createdAt", sortOrder),
     )
 
+    // Fetch seating types from the database
+    const fetchSeatingTypes = async () => {
+      try {
+        const seatingTypesSnapshot = await getDocs(collection(db, "seatingTypes"))
+        const types: string[] = []
+        seatingTypesSnapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.name) {
+            types.push(data.name)
+          }
+        })
+        setSeatingTypes(types)
+      } catch (error) {
+        console.error("Error fetching seating types:", error)
+      }
+    }
+
+    fetchSeatingTypes()
+
     // Query for yesterday's orders (for comparison)
     const yesterdayOrdersQuery = query(
       collection(db, "orders"),
@@ -189,17 +214,16 @@ export function AdminDashboard() {
     const checkExpiredOrders = async () => {
       try {
         const thirtyDaysAgo = subDays(new Date(), 30)
-        const expiredOrdersQuery = query(
-          collection(db, "orders"),
-          where("createdAt", "<", thirtyDaysAgo),
-          where("status", "!=", "paid"),
-        )
+        // First get orders older than 30 days
+        const expiredOrdersQuery = query(collection(db, "orders"), where("createdAt", "<", thirtyDaysAgo))
 
+        // Then filter out paid orders in JavaScript
         const expiredOrdersSnapshot = await getDocs(expiredOrdersQuery)
-        setExpiredOrdersCount(expiredOrdersSnapshot.size)
+        const expiredOrdersCount = expiredOrdersSnapshot.docs.filter((doc) => doc.data().status !== "paid").length
+        setExpiredOrdersCount(expiredOrdersCount)
 
         // Auto-archive expired orders if there are any
-        if (expiredOrdersSnapshot.size > 0) {
+        if (expiredOrdersCount > 0) {
           handleArchiveExpiredOrders()
         }
       } catch (error) {
@@ -350,8 +374,17 @@ export function AdminDashboard() {
         // Check for new orders
         const pendingOrders = ordersList.filter((order) => order.status === "pending")
         if (pendingOrders.length > previousOrderCountRef.current) {
-          // Play notification sound
-          audioRef.current?.play().catch((e) => console.error("Error playing notification sound:", e))
+          // Only try to play sound if user has interacted with the page
+          if (document.visibilityState === "visible" && document.hasFocus()) {
+            // Play notification sound with user gesture requirement workaround
+            const playPromise = audioRef.current?.play()
+            if (playPromise !== undefined) {
+              playPromise.catch((e) => {
+                console.log("Autoplay prevented, waiting for user interaction", e)
+                // We'll show a notification badge instead, which is already implemented
+              })
+            }
+          }
         }
         previousOrderCountRef.current = pendingOrders.length
 
@@ -397,11 +430,6 @@ export function AdminDashboard() {
     return () => unsubscribe()
   }, [toast, sortOrder, timeRange])
 
-
-
-
-
-
   const getSeatingTypeDisplay = (order: Order) => {
     if (order.orderType === "delivery") {
       return "Yetkazib berish"
@@ -419,14 +447,6 @@ export function AdminDashboard() {
 
     return order.tableType || "Stol"
   }
-
-
-
-
-
-
-
-
 
   // Handle order selection
   const handleSelectOrder = (order: Order) => {
@@ -636,20 +656,31 @@ export function AdminDashboard() {
     // Filter by waiter
     let waiterMatch = true
     if (waiterFilter !== "all" && order.orderType === "table") {
-      // Get waiter ID from table or room
-      let waiterId = null
-      if (order.seatingType) {
-        // If we have the seating type directly
-        return order.seatingType
-      }
-      if (order.tableNumber) {
-        const table = orders.find((o) => o.tableNumber === order.tableNumber)
-        waiterId = table?.waiterId
-      } else if (order.roomNumber) {
-        const room = orders.find((o) => o.roomNumber === order.roomNumber)
-        waiterId = room?.waiterId
-      }
+      // Get waiter ID directly from the order
+      const waiterId = order.waiterId || null
       waiterMatch = waiterId === waiterFilter
+    }
+
+    // Filter by seating type
+    let seatingTypeMatch = true
+    if (seatingTypeFilter) {
+      seatingTypeMatch =
+        order.seatingType === seatingTypeFilter ||
+        (seatingTypeFilter === "Xona" && order.roomNumber !== null) ||
+        (seatingTypeFilter === "Stol" &&
+          order.tableNumber !== null &&
+          !order.roomNumber &&
+          (!order.seatingType || order.seatingType === "Stol"))
+    }
+
+    // Filter by seating number
+    let seatingNumberMatch = true
+    if (seatingNumberFilter !== null) {
+      if (order.seatingType === "Xona" || (!order.seatingType && order.roomNumber)) {
+        seatingNumberMatch = order.roomNumber === seatingNumberFilter
+      } else {
+        seatingNumberMatch = order.tableNumber === seatingNumberFilter
+      }
     }
 
     // Filter by search query
@@ -668,8 +699,19 @@ export function AdminDashboard() {
         order.items.some((item) => item.name.toLowerCase().includes(query))
     }
 
-    return statusMatch && typeMatch && dateMatch && searchMatch && waiterMatch
+    return statusMatch && typeMatch && dateMatch && searchMatch && waiterMatch && seatingTypeMatch && seatingNumberMatch
   })
+
+  // Add a function to clear all filters
+  const clearAllFilters = () => {
+    setStatusFilter("all")
+    setOrderTypeFilter("all")
+    setDateFilter("")
+    setSearchQuery("")
+    setWaiterFilter("all")
+    setSeatingTypeFilter(null)
+    setSeatingNumberFilter(null)
+  }
 
   // Count orders by status
   const pendingCount = orders.filter((order) => order.status === "pending").length
@@ -1186,11 +1228,11 @@ export function AdminDashboard() {
                             return (
                               <TableRow key={order.id} className={daysSinceCreated > 7 ? "bg-red-50" : ""}>
                                 <TableCell>
-                                {order.orderType === "table"
-                          ? order.roomNumber
-                            ? `Xona #${order.roomNumber}`
-                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
-                          : "Yetkazib berish"}
+                                  {order.orderType === "table"
+                                    ? order.roomNumber
+                                      ? `Xona #${order.roomNumber}`
+                                      : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
+                                    : "Yetkazib berish"}
                                 </TableCell>
                                 <TableCell className="font-medium">{formatCurrency(order.total)}</TableCell>
                                 <TableCell>
@@ -1353,6 +1395,60 @@ export function AdminDashboard() {
                       </Select>
                     </div>
 
+                    {/* Add new seating type and number filters */}
+                    <div className="flex flex-col gap-4 sm:flex-row mt-4">
+                      <Select
+                        value={seatingTypeFilter || "all"}
+                        onValueChange={(value) => setSeatingTypeFilter(value === "all" ? null : value)}
+                      >
+                        <SelectTrigger className="w-[180px]">
+                          <div className="flex items-center gap-2">
+                            <TableIcon className="h-4 w-4" />
+                            <SelectValue placeholder="Joy turi" />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Barcha joy turlari</SelectItem>
+                          {seatingTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="Xona">Xona</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder="Joy raqami"
+                          value={seatingNumberFilter === null ? "" : seatingNumberFilter}
+                          onChange={(e) => {
+                            const value = e.target.value === "" ? null : Number.parseInt(e.target.value, 10)
+                            setSeatingNumberFilter(value)
+                          }}
+                          className="w-[120px]"
+                        />
+                        {(seatingTypeFilter || seatingNumberFilter !== null) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setSeatingTypeFilter(null)
+                              setSeatingNumberFilter(null)
+                            }}
+                            title="Joy filtrlarini tozalash"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+
+                      <Button variant="outline" size="sm" onClick={clearAllFilters} className="ml-auto">
+                        Barcha filtrlarni tozalash
+                      </Button>
+                    </div>
+
                     <div className="flex gap-2 overflow-x-auto pb-2">
                       <button
                         onClick={() => setStatusFilter("all")}
@@ -1411,6 +1507,128 @@ export function AdminDashboard() {
                     </div>
                   </div>
 
+                  {/* Active filters indicator */}
+                  {(statusFilter !== "all" ||
+                    orderTypeFilter !== "all" ||
+                    dateFilter ||
+                    searchQuery ||
+                    waiterFilter !== "all" ||
+                    seatingTypeFilter ||
+                    seatingNumberFilter !== null) && (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      <div className="text-sm text-muted-foreground mr-2">Faol filtrlar:</div>
+
+                      {statusFilter !== "all" && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Status:{" "}
+                          {statusFilter === "pending"
+                            ? "Kutilmoqda"
+                            : statusFilter === "preparing"
+                              ? "Tayyorlanmoqda"
+                              : statusFilter === "completed"
+                                ? "Yakunlangan"
+                                : "To'landi"}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setStatusFilter("all")}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {orderTypeFilter !== "all" && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Tur: {orderTypeFilter === "table" ? "Stol" : "Yetkazib berish"}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setOrderTypeFilter("all")}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {dateFilter && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Sana: {dateFilter}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setDateFilter("")}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {searchQuery && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Qidiruv: {searchQuery}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setSearchQuery("")}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {waiterFilter !== "all" && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Ofitsiant: {waiters.find((w) => w.id === waiterFilter)?.name || waiterFilter}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setWaiterFilter("all")}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {seatingTypeFilter && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Joy turi: {seatingTypeFilter}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setSeatingTypeFilter(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      {seatingNumberFilter !== null && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          Joy raqami: {seatingNumberFilter}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-4 w-4 p-0 ml-1"
+                            onClick={() => setSeatingNumberFilter(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      )}
+
+                      <Button variant="outline" size="sm" onClick={clearAllFilters} className="ml-auto">
+                        Barcha filtrlarni tozalash
+                      </Button>
+                    </div>
+                  )}
+
                   {isLoading ? (
                     <div className="flex h-60 items-center justify-center">
                       <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -1459,11 +1677,11 @@ export function AdminDashboard() {
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                   <div className="font-medium">
-                                  {order.orderType === "table"
-                          ? order.roomNumber
-                            ? `Xona #${order.roomNumber}`
-                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
-                          : "Yetkazib berish"}
+                                    {order.orderType === "table"
+                                      ? order.roomNumber
+                                        ? `Xona #${order.roomNumber}`
+                                        : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
+                                      : "Yetkazib berish"}
                                   </div>
                                   <Badge
                                     variant="outline"
@@ -1514,7 +1732,7 @@ export function AdminDashboard() {
                                 {order.orderType === "table" && (
                                   <div className="flex items-center justify-between">
                                     <span className="text-sm text-muted-foreground">Ofitsiant:</span>
-                                    <span className="text-sm">
+                                    <span className="text-sm font-medium">
                                       {waiters.find((w) => w.id === order.waiterId)?.name || "Belgilanmagan"}
                                     </span>
                                   </div>
@@ -1533,18 +1751,31 @@ export function AdminDashboard() {
                                 >
                                   Status o'zgartirish
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-gray-600"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleSelectOrder(order)
-                                  }}
-                                >
-                                  <Info className="h-4 w-4 mr-1" />
-                                  Batafsil
-                                </Button>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-gray-600"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleSelectOrder(order)
+                                    }}
+                                  >
+                                    <Info className="h-4 w-4 mr-1" />
+                                    Batafsil
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-600 hover:bg-red-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDeleteClick(order)
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                             </CardContent>
                           </Card>

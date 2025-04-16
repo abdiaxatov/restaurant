@@ -390,7 +390,7 @@ export function TableManagement() {
           actualCounts[item.type]++
         })
 
-        // Update types where count doesn't match
+        // Update types where count doesn’t match
         for (const type of seatingTypes) {
           const actualCount = actualCounts[type.name] || 0
           if (type.count !== actualCount) {
@@ -509,26 +509,22 @@ export function TableManagement() {
     setIsSubmitting(true)
 
     try {
-      // Instead of using a range query that requires an index, check each number individually
+      // Check if any items with these numbers and type already exist
       const startNumber = batchItemStartNumber
       const endNumber = batchItemStartNumber + batchItemCount - 1
-      const existingNumbers: number[] = []
 
-      // Check each number individually to avoid needing a composite index
-      for (let i = startNumber; i <= endNumber; i++) {
-        const checkQuery = query(
-          collection(db, "seatingItems"),
-          where("type", "==", batchItemType),
-          where("number", "==", i),
-        )
+      // Get existing items in the range
+      const existingItemsQuery = query(
+        collection(db, "seatingItems"),
+        where("type", "==", batchItemType),
+        where("number", ">=", startNumber),
+        where("number", "<=", endNumber),
+      )
 
-        const snapshot = await getDocs(checkQuery)
-        if (!snapshot.empty) {
-          existingNumbers.push(i)
-        }
-      }
+      const existingItemsSnapshot = await getDocs(existingItemsQuery)
 
-      if (existingNumbers.length > 0) {
+      if (!existingItemsSnapshot.empty) {
+        const existingNumbers = existingItemsSnapshot.docs.map((doc) => doc.data().number)
         toast({
           title: "Xatolik",
           description: `Ba'zi raqamlar allaqachon mavjud: ${existingNumbers.join(", ")}. Boshqa boshlang'ich raqam tanlang.`,
@@ -605,7 +601,7 @@ export function TableManagement() {
         seats: newItemSeats,
         status: newItemStatus,
         type: newItemType,
-        waiterId: newItemWaiterId,
+        waiterId: newItemWaiterId === "none" ? null : newItemWaiterId,
         updatedAt: new Date(),
       }
 
@@ -1303,12 +1299,14 @@ export function TableManagement() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => {
-                                    setSelectedItem(item)
-                                    setNewItemNumber(item.number)
-                                    setNewItemSeats(item.seats)
-                                    setNewItemType(item.type)
-                                    setNewItemStatus(item.status)
-                                    setNewItemWaiterId(item.waiterId || null)
+                                    // Fix: Store the complete item in selectedItem and extract the values immediately
+                                    const itemToEdit = { ...item }
+                                    setSelectedItem(itemToEdit)
+                                    setNewItemNumber(itemToEdit.number)
+                                    setNewItemSeats(itemToEdit.seats)
+                                    setNewItemType(itemToEdit.type)
+                                    setNewItemStatus(itemToEdit.status)
+                                    setNewItemWaiterId(itemToEdit.waiterId || null)
                                     setIsEditingItem(true)
                                   }}
                                 >
@@ -1413,12 +1411,13 @@ export function TableManagement() {
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => {
-                                        setSelectedItem(item)
-                                        setNewItemNumber(item.number)
-                                        setNewItemSeats(item.seats)
-                                        setNewItemType(item.type)
-                                        setNewItemStatus(item.status)
-                                        setNewItemWaiterId(item.waiterId || null)
+                                        const itemToEdit = { ...item }
+                                        setSelectedItem(itemToEdit)
+                                        setNewItemNumber(itemToEdit.number)
+                                        setNewItemSeats(itemToEdit.seats)
+                                        setNewItemType(itemToEdit.type)
+                                        setNewItemStatus(itemToEdit.status)
+                                        setNewItemWaiterId(itemToEdit.waiterId || null)
                                         setIsEditingItem(true)
                                       }}
                                     >

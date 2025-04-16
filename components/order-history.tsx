@@ -3,20 +3,58 @@
 import { useEffect, useState } from "react"
 import { doc, onSnapshot, collection, query, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, ChefHat, Utensils, MapPin, Phone } from "lucide-react"
+import { Clock, CheckCircle, ChefHat, Utensils, MapPin, Phone, User, AlertCircle } from "lucide-react"
 import type { Order } from "@/types"
 import { useRouter } from "next/navigation"
+import { getWaiterNameById } from "@/lib/table-service"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { toast } from "@/components/ui/use-toast"
+
+// Import the markOrderAsPaid function
+import { markOrderAsPaid } from "@/lib/receipt-service"
 
 export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [waiterNames, setWaiterNames] = useState<Record<string, string | null>>({})
   const router = useRouter()
+
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
+
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }
+
+    return order.tableType || "Stol"
+  }
+
+  const getSeatingDisplay = (order: Order) => {
+    const type = getSeatingTypeDisplay(order)
+
+    if (order.orderType === "delivery") {
+      return type
+    }
+
+    const number = order.roomNumber || order.tableNumber
+    return `${type} ${number}`
+  }
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -104,6 +142,29 @@ export function OrderHistory() {
     fetchOrders()
   }, [])
 
+  // Fetch waiter names when orders change
+  useEffect(() => {
+    const fetchWaiterNames = async () => {
+      const waiterIds = orders
+        .filter((order) => order.waiterId)
+        .map((order) => order.waiterId as string)
+        .filter((id, index, self) => self.indexOf(id) === index) // Get unique IDs
+
+      const namesMap: Record<string, string | null> = {}
+
+      for (const id of waiterIds) {
+        const name = await getWaiterNameById(id)
+        namesMap[id] = name
+      }
+
+      setWaiterNames(namesMap)
+    }
+
+    if (orders.length > 0) {
+      fetchWaiterNames()
+    }
+  }, [orders])
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending":
@@ -189,30 +250,45 @@ export function OrderHistory() {
 
   return (
     <div className="space-y-4">
-
+      <Tabs defaultValue="all" onValueChange={setStatusFilter}>
+        <TabsList className="mb-4 w-full flex-wrap">
+          <TabsTrigger value="all">Barchasi</TabsTrigger>
+          <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
+          <TabsTrigger value="preparing">Tayyorlanmoqda</TabsTrigger>
+          <TabsTrigger value="ready">Tayyor</TabsTrigger>
+          <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       <div className="space-y-4">
         {sortedOrders.map((order) => (
           <Card
             key={order.id}
-            className="overflow-hidden cursor-pointer transition-all hover:shadow-md"
-            onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
+            className={`overflow-hidden ${order.isPaid === false && order.status === "completed" ? "border-2 border-amber-400" : ""}`}
           >
+            {order.isPaid === false && (
+              <div className="bg-amber-100 px-4 py-2 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600" />
+                <span className="text-amber-800 text-sm font-medium">To'lanmagan buyurtma</span>
+              </div>
+            )}
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between text-lg">
-                {order.roomNumber ? (
-                  <span>Xona #{order.roomNumber}</span>
-                ) : order.orderType === "table" ? (
-                  <span>Stol #{order.tableNumber}</span>
-                ) : (
-                  <span>Yetkazib berish</span>
-                )}
+                <span>{getSeatingDisplay(order)}</span>
                 <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-base font-normal">
                   {getStatusIcon(order.status)}
                   <span className="capitalize">{getStatusText(order.status)}</span>
                 </div>
               </CardTitle>
-              <p className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
+                {order.waiterId && waiterNames[order.waiterId] && (
+                  <Badge variant="outline" className="flex items-center gap-1">
+                    <User className="h-3 w-3" />
+                    <span>{waiterNames[order.waiterId]}</span>
+                  </Badge>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {order.orderType === "delivery" && (
@@ -273,6 +349,53 @@ export function OrderHistory() {
                 </div>
               </div>
             </CardContent>
+            <CardFooter className="flex justify-between pt-2">
+              <Button variant="link" size="sm" className="px-0" asChild>
+                <Link href={`/confirmation?orderId=${order.id}`}>Batafsil</Link>
+              </Button>
+
+              {order.status === "completed" && !order.isPaid && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-green-600 hover:bg-green-50 hover:text-green-700"
+                  onClick={async () => {
+                    try {
+                      const success = await markOrderAsPaid(order.id)
+                      if (success) {
+                        router.push(`/receipt?orderId=${order.id}`)
+                      } else {
+                        toast({
+                          title: "Xatolik",
+                          description: "To'lovni qayd qilishda xatolik yuz berdi",
+                          variant: "destructive",
+                        })
+                      }
+                    } catch (error) {
+                      console.error("Error marking order as paid:", error)
+                      toast({
+                        title: "Xatolik",
+                        description: "To'lovni qayd qilishda xatolik yuz berdi",
+                        variant: "destructive",
+                      })
+                    }
+                  }}
+                >
+                  To'lash
+                </Button>
+              )}
+
+              {order.isPaid && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-green-600 hover:bg-green-50 hover:text-green-700"
+                  onClick={() => router.push(`/receipt?orderId=${order.id}`)}
+                >
+                  Chekni ko'rish
+                </Button>
+              )}
+            </CardFooter>
           </Card>
         ))}
       </div>

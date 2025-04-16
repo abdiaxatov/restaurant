@@ -140,8 +140,14 @@ export function WaiterPage() {
     localStorage.setItem("chefWaiterFilter", waiterFilter)
   }, [waiterFilter])
 
-  // Function to get waiter name for an order
+  // Update the getWaiterName function to directly use the order's waiterId if available
   const getWaiterName = (order: Order) => {
+    // First check if the order has a waiterId directly
+    if (order.waiterId && waiterNames[order.waiterId]) {
+      return waiterNames[order.waiterId]
+    }
+
+    // Fall back to the previous logic for backward compatibility
     if (order.orderType === "table") {
       if (order.tableNumber && tableWaiters[order.tableNumber]) {
         const waiterId = tableWaiters[order.tableNumber]
@@ -154,7 +160,7 @@ export function WaiterPage() {
     return "Belgilanmagan"
   }
 
-  // Function to fetch orders
+  // Update the fetchOrders function to also fetch orders with waiterId
   const fetchOrders = async () => {
     try {
       // Get pending orders using our improved helper function
@@ -170,6 +176,12 @@ export function WaiterPage() {
       let filteredPendingOrders = pendingOrdersData
       if (waiterFilter !== "all") {
         filteredPendingOrders = pendingOrdersData.filter((order) => {
+          // First check if the order has a waiterId directly
+          if (order.waiterId) {
+            return order.waiterId === waiterFilter
+          }
+
+          // Fall back to the previous logic
           if (order.orderType !== "table") return false
 
           if (order.tableNumber && tableWaiters[order.tableNumber]) {
@@ -195,6 +207,12 @@ export function WaiterPage() {
       let filteredPreparingOrders = preparingOrdersData
       if (waiterFilter !== "all") {
         filteredPreparingOrders = preparingOrdersData.filter((order) => {
+          // First check if the order has a waiterId directly
+          if (order.waiterId) {
+            return order.waiterId === waiterFilter
+          }
+
+          // Fall back to the previous logic
           if (order.orderType !== "table") return false
 
           if (order.tableNumber && tableWaiters[order.tableNumber]) {
@@ -220,6 +238,12 @@ export function WaiterPage() {
       let filteredCompletedOrders = completedOrdersData
       if (waiterFilter !== "all") {
         filteredCompletedOrders = completedOrdersData.filter((order) => {
+          // First check if the order has a waiterId directly
+          if (order.waiterId) {
+            return order.waiterId === waiterFilter
+          }
+
+          // Fall back to the previous logic
           if (order.orderType !== "table") return false
 
           if (order.tableNumber && tableWaiters[order.tableNumber]) {
@@ -395,16 +419,15 @@ export function WaiterPage() {
                             ? `Xona #${order.roomNumber}`
                             : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
-                        {order.orderType === "table" && (
-                          <span className="ml-1 text-sm font-normal text-muted-foreground">
-                            - {getWaiterName(order)}
-                          </span>
-                        )}
                       </CardTitle>
                       <Badge variant="outline" className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         Yangi
                       </Badge>
+                    </div>
+                    <div className="mt-1 flex items-center text-xs text-muted-foreground">
+                      <User className="mr-1 h-3 w-3" />
+                      <span>Ofitsiant: {getWaiterName(order)}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>
@@ -452,15 +475,14 @@ export function WaiterPage() {
                             ? `Xona #${order.roomNumber}`
                             : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
-                        {order.orderType === "table" && (
-                          <span className="ml-1 text-sm font-normal text-muted-foreground">
-                            - {getWaiterName(order)}
-                          </span>
-                        )}
                       </CardTitle>
                       <Badge variant="outline" className="bg-amber-100 text-amber-700">
                         Tayyorlanmoqda
                       </Badge>
+                    </div>
+                    <div className="mt-1 flex items-center text-xs text-muted-foreground">
+                      <User className="mr-1 h-3 w-3" />
+                      <span>Ofitsiant: {getWaiterName(order)}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>
@@ -509,15 +531,14 @@ export function WaiterPage() {
                             ? `Xona #${order.roomNumber}`
                             : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
-                        {order.orderType === "table" && (
-                          <span className="ml-1 text-sm font-normal text-muted-foreground">
-                            - {getWaiterName(order)}
-                          </span>
-                        )}
                       </CardTitle>
                       <Badge variant="outline" className="bg-green-100 text-green-700">
                         Yakunlangan
                       </Badge>
+                    </div>
+                    <div className="mt-1 flex items-center text-xs text-muted-foreground">
+                      <User className="mr-1 h-3 w-3" />
+                      <span>Ofitsiant: {getWaiterName(order)}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">{formatDate(order.createdAt)}</div>
                   </CardHeader>

@@ -56,6 +56,16 @@ export function CartPage() {
     phoneNumber?: boolean
     address?: boolean
   }>({})
+  const [waiterId, setWaiterId] = useState<string | null>(null)
+  const [orderData, setOrderData] = useState<any>({})
+  const [selectedTable, setSelectedTable] = useState<number | null>(null)
+  const [selectedRoom, setSelectedRoom] = useState<number | null>(null)
+  const [selectedTableType, setSelectedTableType] = useState<string | null>(null)
+  const [customerName, setCustomerName] = useState<string>("")
+  const [customerPhone, setCustomerPhone] = useState<string>("")
+  const [customerAddress, setCustomerAddress] = useState<string>("")
+  const [paymentMethod, setPaymentMethod] = useState<string>("cash")
+  const [notes, setNotes] = useState<string>("")
 
   // Check if there's a recent order and set the table/room automatically
   useEffect(() => {
@@ -236,10 +246,25 @@ export function CartPage() {
   }, [items, orderType, menuItems])
 
   // Handle table or room selection
-  const handleSelectTableOrRoom = (table: number | null, room: number | null, type: string | null = null) => {
+  const handleSelectTableOrRoom = (
+    table: number | null,
+    room: number | null,
+    type: string | null = null,
+    waiterId: string | null = null,
+    userRecentlyUsed = false,
+  ) => {
     setTableNumber(table)
     setRoomNumber(room)
     setSeatingType(type)
+    setWaiterId(waiterId)
+
+    // Store whether this is a table the user recently used
+    setOrderData((prev) => ({
+      ...prev,
+      userRecentlyUsed: userRecentlyUsed,
+    }))
+
+    console.log("Selected waiterId:", waiterId, "User recently used:", userRecentlyUsed)
   }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
@@ -349,26 +374,35 @@ export function CartPage() {
         }
       }
 
-      // If seating item is selected, mark it as occupied
+      // If seating item is selected, check if we need to mark it as occupied
       if (orderType === "table") {
-        let success = false
+        let success = true
 
-        if (roomNumber) {
-          // For rooms, always use "Xona" as the type
-          success = await markSeatingItemAsOccupied(roomNumber, "Xona")
-        } else if (tableNumber && seatingType) {
-          success = await markSeatingItemAsOccupied(tableNumber, seatingType)
-        }
+        // Only mark as occupied if not already in use by this user
+        if (!orderData.userRecentlyUsed) {
+          if (roomNumber) {
+            success = await markSeatingItemAsOccupied(roomNumber, "Xona")
+          } else if (tableNumber && seatingType) {
+            success = await markSeatingItemAsOccupied(tableNumber, seatingType)
+          }
 
-        if (!success) {
-          toast({
-            title: "Xatolik",
-            description: "Joy statusini yangilashda xatolik yuz berdi.",
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
+          if (!success) {
+            toast({
+              title: "Xatolik",
+              description: "Joy statusini yangilashda xatolik yuz berdi.",
+              variant: "destructive",
+            })
+            setIsSubmitting(false)
+            return
+          }
         }
+      }
+
+      // Get a unique identifier for this user from localStorage
+      let userSignature = localStorage.getItem("userSignature")
+      if (!userSignature) {
+        userSignature = Math.random().toString(36).substring(2, 15)
+        localStorage.setItem("userSignature", userSignature)
       }
 
       // Prepare order data with updated container information
@@ -401,7 +435,51 @@ export function CartPage() {
         containerCost: orderType === "delivery" ? containerCost : 0,
         total: totalWithDelivery,
         status: "pending",
+        isPaid: false, // Add a flag for payment status
         createdAt: serverTimestamp(),
+        userSignature: userSignature, // Add user signature to track their tables
+        ...(waiterId ? { waiterId } : {}),
+      }
+
+      // Also add a debug log to check the final order data
+      console.log("Order data being submitted:", orderData)
+
+      // Add code to get the waiterId from the seating item and include it in the order
+      if (orderType === "table") {
+        try {
+          let seatingItemQuery
+          if (roomNumber) {
+            // For rooms
+            seatingItemQuery = query(
+              collection(db, "seatingItems"),
+              where("number", "==", roomNumber),
+              where("type", "==", "Xona"),
+            )
+          } else if (tableNumber && seatingType) {
+            // For tables and other seating types
+            seatingItemQuery = query(
+              collection(db, "seatingItems"),
+              where("number", "==", tableNumber),
+              where("type", "==", seatingType),
+            )
+          }
+
+          if (seatingItemQuery) {
+            const seatingItemSnapshot = await getDocs(seatingItemQuery)
+            if (!seatingItemSnapshot.empty) {
+              const seatingItemData = seatingItemSnapshot.docs[0].data()
+              if (seatingItemData.waiterId) {
+                orderData.waiterId = seatingItemData.waiterId
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error getting waiter ID from seating item:", error)
+        }
+      }
+
+      if (waiterId) {
+        orderData.waiterId = waiterId
       }
 
       // Add order to Firestore
@@ -534,6 +612,23 @@ export function CartPage() {
 
   // Check if any ordering option is available
   const isOrderingAvailable = hasAvailableSeatingItems || isDeliveryAvailable
+
+  const calculateTotal = () => {
+    const subtotal = items.reduce((acc, item) => acc + item.price * item.quantity, 0)
+    return subtotal + (orderType === "delivery" ? deliveryFee : 0)
+  }
+
+  const handleTableSelect = (tableNumber: number, tableType: string) => {
+    setSelectedTable(tableNumber)
+    setSelectedTableType(tableType)
+    setSelectedRoom(null)
+  }
+
+  const handleRoomSelect = (roomNumber: number) => {
+    setSelectedRoom(roomNumber)
+    setSelectedTable(null)
+    setSelectedTableType(null)
+  }
 
   return (
     <div className="container mx-auto max-w-4xl p-4">

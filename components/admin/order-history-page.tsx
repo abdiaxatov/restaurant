@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { collection, query, orderBy, onSnapshot, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import AdminLayout  from "@/components/admin/admin-layout"
+import AdminLayout from "@/components/admin/admin-layout"
 import { OrderDetails } from "@/components/admin/order-details"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -112,6 +112,12 @@ export function OrderHistoryPage() {
 
   // Function to get waiter name for an order
   const getWaiterName = (order: Order) => {
+    // First check if the order has a waiterId directly
+    if (order.waiterId && waiterNames[order.waiterId]) {
+      return waiterNames[order.waiterId]
+    }
+
+    // Fallback to the old method for backward compatibility
     if (order.orderType === "table") {
       if (order.tableNumber && tableWaiters[order.tableNumber]) {
         const waiterId = tableWaiters[order.tableNumber]
@@ -161,7 +167,23 @@ export function OrderHistoryPage() {
     setIsOrderDetailsOpen(false)
     setSelectedOrder(null)
   }
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
 
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }
+
+    return order.tableType || "Stol"
+  }
   // Filter orders based on active tab, date, and waiter
   const filteredOrders = orders.filter((order) => {
     // Filter by tab
@@ -408,17 +430,19 @@ export function OrderHistoryPage() {
             </div>
 
             <div className="p-4">
-              <div className="mb-2 flex items-center justify-between">
+              <div>
                 <div className="font-medium">
-                  {order.orderType === "table"
-                    ? order.roomNumber
-                      ? `Xona #${order.roomNumber}`
-                      : `Stol #${order.tableNumber || "?"}`
-                    : "Yetkazib berish"}
-                  {order.orderType === "table" && (
-                    <span className="ml-1 text-sm text-muted-foreground">- {getWaiterName(order)}</span>
-                  )}
+                {order.orderType === "table"
+                                    ? order.roomNumber
+                                      ? `Xona #${order.roomNumber}`
+                                      : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
+                                    : "Yetkazib berish"}
                 </div>
+                {order.orderType === "table" && (
+                  <div className="text-sm text-muted-foreground">Ofitsiant: {getWaiterName(order)}</div>
+                )}
+              </div>
+              <div className="mb-2 flex items-center justify-between">
                 <div className="font-semibold text-primary">{formatCurrency(order.total)}</div>
               </div>
 

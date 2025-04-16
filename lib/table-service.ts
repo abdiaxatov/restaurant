@@ -1,60 +1,88 @@
-import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore"
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 
-// Function to mark a table as occupied
-export const markTableAsOccupied = async (tableNumber: number): Promise<boolean> => {
+// Function to get waiter information for a seating item
+export async function getWaiterForSeatingItem(
+  type: string,
+  number: number,
+): Promise<{ id: string; name: string } | null> {
   try {
-    // Find the table by number
-    const tablesQuery = query(collection(db, "tables"), where("number", "==", tableNumber))
-    const tablesSnapshot = await getDocs(tablesQuery)
-    let tableId: string | null = null
+    // Query the seating item
+    const seatingItemsQuery = query(
+      collection(db, "seatingItems"),
+      where("type", "==", type),
+      where("number", "==", number),
+    )
 
-    tablesSnapshot.forEach((doc) => {
-      tableId = doc.id
-    })
+    const snapshot = await getDocs(seatingItemsQuery)
 
-    if (tableId) {
-      // Update table status to occupied
-      await updateDoc(doc(db, "tables", tableId), {
-        status: "occupied",
-        updatedAt: new Date(),
-      })
-      return true
-    } else {
-      console.error("Table not found")
-      return false
+    if (snapshot.empty) {
+      return null
+    }
+
+    const seatingItem = snapshot.docs[0].data()
+
+    // If no waiterId, return null
+    if (!seatingItem.waiterId) {
+      return null
+    }
+
+    // Get the waiter information
+    const waiterDoc = await getDoc(doc(db, "users", seatingItem.waiterId))
+
+    if (!waiterDoc.exists()) {
+      return null
+    }
+
+    const waiterData = waiterDoc.data()
+
+    return {
+      id: seatingItem.waiterId,
+      name: waiterData.name,
     }
   } catch (error) {
-    console.error("Error updating table status:", error)
-    return false
+    console.error("Error getting waiter for seating item:", error)
+    return null
   }
 }
 
-// Function to mark a room as occupied
-export const markRoomAsOccupied = async (roomNumber: number): Promise<boolean> => {
+// Function to get all waiters
+export async function getAllWaiters(): Promise<{ id: string; name: string }[]> {
   try {
-    // Find the room by number
-    const roomsQuery = query(collection(db, "rooms"), where("number", "==", roomNumber))
-    const roomsSnapshot = await getDocs(roomsQuery)
-    let roomId: string | null = null
+    const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+    const snapshot = await getDocs(waitersQuery)
 
-    roomsSnapshot.forEach((doc) => {
-      roomId = doc.id
+    const waiters: { id: string; name: string }[] = []
+
+    snapshot.forEach((doc) => {
+      const data = doc.data()
+      waiters.push({
+        id: doc.id,
+        name: data.name,
+      })
     })
 
-    if (roomId) {
-      // Update room status to occupied
-      await updateDoc(doc(db, "rooms", roomId), {
-        status: "occupied",
-        updatedAt: new Date(),
-      })
-      return true
-    } else {
-      console.error("Room not found")
-      return false
-    }
+    return waiters
   } catch (error) {
-    console.error("Error updating room status:", error)
-    return false
+    console.error("Error getting all waiters:", error)
+    return []
+  }
+}
+
+// Function to get waiter name by ID
+export async function getWaiterNameById(waiterId: string): Promise<string | null> {
+  try {
+    if (!waiterId) return null
+
+    const waiterDoc = await getDoc(doc(db, "users", waiterId))
+
+    if (!waiterDoc.exists()) {
+      return null
+    }
+
+    return waiterDoc.data().name
+  } catch (error) {
+    console.error("Error getting waiter name by ID:", error)
+    return null
   }
 }

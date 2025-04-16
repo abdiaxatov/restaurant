@@ -45,35 +45,26 @@ export interface Room {
   waiterId?: string
 }
 
-export interface Order {
-  id?: string
+// Update the Order type to include waiterId
+export type Order = {
+  id: string
   orderType: "table" | "delivery"
   tableNumber?: number | null
   roomNumber?: number | null
-  phoneNumber?: string | null
-  address?: string | null
-  items: {
-    id: string
-    name: string
-    price: number
-    quantity: number
-    needsContainer?: boolean
-    containerPrice?: number
-  }[]
-  subtotal?: number
-  deliveryFee?: number
-  containerCost?: number
-  total: number
-  status: "pending" | "preparing" | "ready" | "delivering" | "completed"
+  status: string
   createdAt: any
   updatedAt?: any
-  deletedAt?: any
-  deletedBy?: string
-  tableInfo?: {
-    status: string
-    seats: number
-    roomId?: string
-  }
+  items: CartItem[]
+  total: number
+  customerName?: string
+  customerPhone?: string
+  customerAddress?: string
+  deliveryFee?: number
+  paymentMethod?: string
+  notes?: string
+  tableType?: string
+  seatingType?: string
+  waiterId?: string
 }
 
 export interface User {

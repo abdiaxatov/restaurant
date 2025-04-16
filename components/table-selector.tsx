@@ -27,7 +27,13 @@ try {
 interface TableSelectorProps {
   selectedTable: number | null
   selectedRoom: number | null
-  onSelectTable: (tableNumber: number | null, roomNumber: number | null, type?: string | null) => void
+  onSelectTable: (
+    tableNumber: number | null,
+    roomNumber: number | null,
+    type?: string | null,
+    waiterId?: string | null,
+    userRecentlyUsed?: boolean,
+  ) => void
   hasError?: boolean
 }
 
@@ -39,6 +45,7 @@ type SeatingItem = {
   roomId?: string
   type: string
   waiterId?: string
+  userRecentlyUsed?: boolean
 }
 
 export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasError = false }: TableSelectorProps) {
@@ -53,20 +60,51 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
   const user = auth?.user
   const [seatingTypes, setSeatingTypes] = useState<string[]>([])
   const [selectedSeatingType, setSelectedSeatingType] = useState<string | null>(null)
+  // First, add a state for storing waiter information
+  const [seatingWaiters, setSeatingWaiters] = useState<Record<string, string>>({})
 
-  // Fix the handleSelectItem function to properly handle room selection
+  // Add this useEffect to fetch waiter information for all seating items
+  useEffect(() => {
+    const fetchSeatingWaiters = async () => {
+      try {
+        const seatingItemsQuery = query(collection(db, "seatingItems"), where("status", "==", "available"))
+        const snapshot = await getDocs(seatingItemsQuery)
+
+        const waiterData: Record<string, string> = {}
+
+        snapshot.forEach((doc) => {
+          const data = doc.data()
+          if (data.waiterId) {
+            // Create a key using type and number
+            const key = `${data.type}-${data.number}`
+            waiterData[key] = data.waiterId
+          }
+        })
+
+        setSeatingWaiters(waiterData)
+      } catch (error) {
+        console.error("Error fetching seating waiters:", error)
+      }
+    }
+
+    fetchSeatingWaiters()
+  }, [])
+
+  // Now update the handleSelectItem function to pass the waiterId
   const handleSelectItem = (item: SeatingItem) => {
-    // Store the current selection type to prevent it from changing
-    const itemType = (item.type || "").toLowerCase()
+    const isRoom = item.type.toLowerCase() === "xona"
 
-    if (itemType === "xona") {
-      // When selecting a room, set room number and null table number
-      onSelectTable(null, item.number, "Xona")
-      setSelectedSeatingType("Xona")
+    // Get the waiterId for this seating item
+    const key = `${item.type}-${item.number}`
+    const waiterId = seatingWaiters[key] || null
+
+    // If this is a user-recently-used item, mark it for the order
+    const userRecentlyUsed = item.userRecentlyUsed || false
+
+    if (isRoom) {
+      onSelectTable(null, item.number, item.type, waiterId, userRecentlyUsed)
     } else {
-      // For tables and other seating types
-      onSelectTable(item.number, null, item.type)
-      setSelectedSeatingType(item.type)
+      onSelectTable(item.number, null, item.type, waiterId, userRecentlyUsed)
     }
 
     setIsOpen(false)
@@ -249,6 +287,67 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
 
               setSeatingItems(itemsData)
               setIsLoading(false)
+            }
+
+            const fetchUserSpecificOccupiedItems = async () => {
+              try {
+                // Get user's "signature" - we'll use this to track which tables they've used
+                // Since we don't have user authentication for customers, we'll use a randomly generated ID stored in localStorage
+                let userSignature = localStorage.getItem("userSignature")
+                if (!userSignature) {
+                  userSignature = Math.random().toString(36).substring(2, 15)
+                  localStorage.setItem("userSignature", userSignature)
+                }
+
+                // First, fetch occupied items
+                const occupiedItemsQuery = query(collection(db, "seatingItems"), where("status", "==", "occupied"))
+                const occupiedItemsSnapshot = await getDocs(occupiedItemsQuery)
+
+                // Now fetch recent orders from the last 30 minutes that match this user signature
+                const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000)
+                const recentOrdersQuery = query(
+                  collection(db, "orders"),
+                  where("userSignature", "==", userSignature),
+                  where("createdAt", ">=", thirtyMinutesAgo),
+                )
+
+                const recentOrdersSnapshot = await getDocs(recentOrdersQuery)
+                const recentUserTables = new Set()
+                const recentUserRooms = new Set()
+
+                recentOrdersSnapshot.forEach((doc) => {
+                  const orderData = doc.data()
+                  if (orderData.tableNumber) recentUserTables.add(orderData.tableNumber)
+                  if (orderData.roomNumber) recentUserRooms.add(orderData.roomNumber)
+                })
+
+                // Add occupied items that match the user's recent orders
+                occupiedItemsSnapshot.forEach((doc) => {
+                  const itemData = doc.data() as SeatingItem
+                  const itemType = (itemData.type || "").toLowerCase()
+                  const itemNumber = itemData.number
+
+                  // Add this occupied item if it was recently used by this user
+                  let shouldAdd = false
+                  if (itemType === "xona" && recentUserRooms.has(itemNumber)) {
+                    shouldAdd = true
+                  } else if (itemType !== "xona" && recentUserTables.has(itemNumber)) {
+                    shouldAdd = true
+                  }
+
+                  if (shouldAdd) {
+                    // Mark this as a recently used item by this user
+                    itemsData.push({ id: doc.id, ...itemData, userRecentlyUsed: true })
+                  }
+                })
+              } catch (error) {
+                console.error("Error fetching user-specific occupied items:", error)
+              }
+            }
+
+            // Call this function after setting up the basic listeners
+            if (!user || user.role !== "waiter") {
+              fetchUserSpecificOccupiedItems()
             }
           },
           (error) => {
@@ -460,7 +559,11 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                         <Card
                           key={item.id}
                           className={`cursor-pointer transition-all hover:bg-muted ${
-                            item.status === "occupied" ? "border-amber-500" : ""
+                            item.status === "occupied" && item.userRecentlyUsed
+                              ? "border-green-500 bg-green-50"
+                              : item.status === "occupied"
+                                ? "border-amber-500"
+                                : ""
                           }`}
                           onClick={() => handleSelectItem(item)}
                         >
@@ -475,7 +578,10 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                                 </div>
                                 <Badge variant="outline">{item.seats} kishilik</Badge>
                               </div>
-                              {item.status === "occupied" && (
+                              {item.status === "occupied" && item.userRecentlyUsed && (
+                                <Badge className="mt-2 w-fit bg-green-100 text-green-800">Sizning stolingiz</Badge>
+                              )}
+                              {item.status === "occupied" && !item.userRecentlyUsed && (
                                 <Badge className="mt-2 w-fit bg-amber-100 text-amber-800">Band</Badge>
                               )}
                             </div>
