@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   collection,
   doc,
@@ -10,8 +10,8 @@ import {
   updateDoc,
   onSnapshot,
   query,
-  getDocs,
   where,
+  getDocs,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
@@ -27,10 +27,24 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
-import { Pencil, Trash2, Plus, Loader2, LayoutGrid, Home, RefreshCw, ClipboardList } from "lucide-react"
+import {
+  Pencil,
+  Trash2,
+  Plus,
+  Loader2,
+  LayoutGrid,
+  Home,
+  RefreshCw,
+  Search,
+  Filter,
+  Download,
+  TableIcon,
+  Sofa,
+  Armchair,
+  X,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -44,8 +58,19 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Checkbox } from "@/components/ui/checkbox"
 
-type Table = {
+// Define types for seating items
+type SeatingItem = {
   id: string
   number: number
   seats: number
@@ -54,16 +79,16 @@ type Table = {
   createdAt?: any
   updatedAt?: any
   waiterId?: string | null
+  type: string // Type of seating (Stol, Xona, Divan, Kreslo, etc.)
 }
 
-type Room = {
+// Define type for seating type configuration
+type SeatingType = {
   id: string
-  number: number
-  capacity: number
-  status?: "available" | "occupied"
-  createdAt?: any
-  updatedAt?: any
-  waiterId?: string | null
+  name: string
+  defaultCapacity: number
+  count: number
+  icon?: string
 }
 
 type Order = {
@@ -75,54 +100,54 @@ type Order = {
   createdAt: any
   items: any[]
   total: number
+  seatingType?: string
 }
 
 export function TableManagement() {
-  const [tables, setTables] = useState<Table[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
+  const [seatingItems, setSeatingItems] = useState<SeatingItem[]>([])
+  const [seatingTypes, setSeatingTypes] = useState<SeatingType[]>([])
   const [activeOrders, setActiveOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState("tables")
+  const [activeTab, setActiveTab] = useState("table-view")
+  const [activeTypeTab, setActiveTypeTab] = useState<string | null>(null)
 
-  // Table state
-  const [isAddingTable, setIsAddingTable] = useState(false)
-  const [isEditingTable, setIsEditingTable] = useState(false)
-  const [selectedTable, setSelectedTable] = useState<Table | null>(null)
-  const [newTableNumber, setNewTableNumber] = useState<number>(1)
-  const [newTableSeats, setNewTableSeats] = useState<number>(4)
-  const [newTableRoomId, setNewTableRoomId] = useState<string | null>(null)
-  const [newTableStatus, setNewTableStatus] = useState<"available" | "occupied" | "reserved">("available")
-  const [showOccupiedTables, setShowOccupiedTables] = useState(true)
-  const [selectedRoomFilter, setSelectedRoomFilter] = useState<string | null>(null)
+  // Seating item state
+  const [isAddingItem, setIsAddingItem] = useState(false)
+  const [isEditingItem, setIsEditingItem] = useState(false)
+  const [selectedItem, setSelectedItem] = useState<SeatingItem | null>(null)
+  const [newItemNumber, setNewItemNumber] = useState<number>(1)
+  const [newItemSeats, setNewItemSeats] = useState<number>(4)
+  const [newItemType, setNewItemType] = useState<string>("Stol")
+  const [newItemStatus, setNewItemStatus] = useState<"available" | "occupied" | "reserved">("available")
+  const [showOccupiedItems, setShowOccupiedItems] = useState(true)
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string | null>(null)
 
-  // Batch table creation
-  const [isBatchAddingTables, setIsBatchAddingTables] = useState(false)
-  const [batchTableCount, setBatchTableCount] = useState<number>(10)
-  const [batchTableStartNumber, setBatchTableStartNumber] = useState<number>(1)
-  const [batchTableSeats, setBatchTableSeats] = useState<number>(4)
-  const [batchTableRoomId, setBatchTableRoomId] = useState<string | null>(null)
+  // Batch item creation
+  const [isBatchAddingItems, setIsBatchAddingItems] = useState(false)
+  const [batchItemCount, setBatchItemCount] = useState<number>(10)
+  const [batchItemStartNumber, setBatchItemStartNumber] = useState<number>(1)
+  const [batchItemSeats, setBatchItemSeats] = useState<number>(4)
+  const [batchItemType, setBatchItemType] = useState<string>("Stol")
 
-  // Room state
-  const [isAddingRoom, setIsAddingRoom] = useState(false)
-  const [isEditingRoom, setIsEditingRoom] = useState(false)
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
-  const [newRoomNumber, setNewRoomNumber] = useState<number>(1)
-  const [newRoomCapacity, setNewRoomCapacity] = useState<number>(20)
-  const [newRoomStatus, setNewRoomStatus] = useState<"available" | "occupied">("available")
-  const [showOccupiedRooms, setShowOccupiedRooms] = useState(true)
+  // Seating type management
+  const [isAddingType, setIsAddingType] = useState(false)
+  const [isEditingType, setIsEditingType] = useState(false)
+  const [selectedType, setSelectedType] = useState<SeatingType | null>(null)
+  const [newTypeName, setNewTypeName] = useState<string>("")
+  const [newTypeCapacity, setNewTypeCapacity] = useState<number>(4)
+  const [newTypeCount, setNewTypeCount] = useState<number>(0)
 
-  // Room tables view
-  const [viewingRoomTables, setViewingRoomTables] = useState<Room | null>(null)
-  const [roomTables, setRoomTables] = useState<Table[]>([])
-
-  // Order details view
-  const [viewingOrderDetails, setViewingOrderDetails] = useState<Order[] | null>(null)
+  // Search and filter
+  const [searchTerm, setSearchTerm] = useState<string>("")
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [capacityFilter, setCapacityFilter] = useState<number | null>(null)
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [selectAll, setSelectAll] = useState(false)
 
   // Add a new state for waiters list
   const [waiters, setWaiters] = useState<any[]>([])
-  const [newTableWaiterId, setNewTableWaiterId] = useState<string | null>(null)
-  const [batchTableWaiterId, setBatchTableWaiterId] = useState<string | null>(null)
-  const [newRoomWaiterId, setNewRoomWaiterId] = useState<string | null>(null)
+  const [newItemWaiterId, setNewItemWaiterId] = useState<string | null>(null)
+  const [batchItemWaiterId, setBatchItemWaiterId] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
@@ -135,73 +160,89 @@ export function TableManagement() {
     }).format(amount)
   }
 
-  // Fetch tables, rooms, and active orders
+  // Fetch seating items, types, and active orders
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Tables listener
-        const tablesUnsubscribe = onSnapshot(
-          collection(db, "tables"),
+        // Seating items listener
+        const itemsUnsubscribe = onSnapshot(
+          collection(db, "seatingItems"),
           (snapshot) => {
-            const tablesData: Table[] = []
+            const itemsData: SeatingItem[] = []
             snapshot.forEach((doc) => {
-              tablesData.push({ id: doc.id, ...doc.data() } as Table)
+              itemsData.push({ id: doc.id, ...doc.data() } as SeatingItem)
             })
 
-            // Sort tables by number
-            tablesData.sort((a, b) => a.number - b.number)
-            setTables(tablesData)
+            // Sort items by type and number
+            itemsData.sort((a, b) => {
+              if (a.type !== b.type) {
+                return a.type.localeCompare(b.type)
+              }
+              return a.number - b.number
+            })
 
-            // Set next table number suggestion
-            if (tablesData.length > 0) {
-              const maxTableNumber = Math.max(...tablesData.map((t) => t.number))
-              setNewTableNumber(maxTableNumber + 1)
-              setBatchTableStartNumber(maxTableNumber + 1)
+            setSeatingItems(itemsData)
+
+            // Set next item number suggestion
+            if (itemsData.length > 0) {
+              const maxItemNumber = Math.max(...itemsData.map((t) => t.number))
+              setNewItemNumber(maxItemNumber + 1)
+              setBatchItemStartNumber(maxItemNumber + 1)
             }
           },
           (error) => {
-            console.error("Error fetching tables:", error)
+            console.error("Error fetching seating items:", error)
             toast({
               title: "Xatolik",
-              description: "Stollarni yuklashda xatolik yuz berdi",
+              description: "Joy elementlarini yuklashda xatolik yuz berdi",
               variant: "destructive",
             })
           },
         )
 
-        // Rooms listener
-        const roomsUnsubscribe = onSnapshot(
-          collection(db, "rooms"),
+        // Seating types listener
+        const typesUnsubscribe = onSnapshot(
+          collection(db, "seatingTypes"),
           (snapshot) => {
-            const roomsData: Room[] = []
+            const typesData: SeatingType[] = []
             snapshot.forEach((doc) => {
-              roomsData.push({ id: doc.id, ...doc.data() } as Room)
+              typesData.push({ id: doc.id, ...doc.data() } as SeatingType)
             })
 
-            // Sort rooms by number
-            roomsData.sort((a, b) => a.number - b.number)
-            setRooms(roomsData)
+            // Sort types alphabetically
+            typesData.sort((a, b) => a.name.localeCompare(b.name))
+            setSeatingTypes(typesData)
 
-            // Set next room number suggestion
-            if (roomsData.length > 0) {
-              const maxRoomNumber = Math.max(...roomsData.map((r) => r.number))
-              setNewRoomNumber(maxRoomNumber + 1)
+            // Set default item type if not set
+            if (typesData.length > 0 && !newItemType) {
+              setNewItemType(typesData[0].name)
+              setBatchItemType(typesData[0].name)
+            }
+
+            // Set active type tab if not set
+            if (!activeTypeTab && typesData.length > 0) {
+              setActiveTypeTab(typesData[0].name)
+            }
+
+            // If no types exist, create default types
+            if (typesData.length === 0) {
+              createDefaultSeatingTypes()
             }
 
             setIsLoading(false)
           },
           (error) => {
-            console.error("Error fetching rooms:", error)
+            console.error("Error fetching seating types:", error)
             toast({
               title: "Xatolik",
-              description: "Xonalarni yuklashda xatolik yuz berdi",
+              description: "Joy turlarini yuklashda xatolik yuz berdi",
               variant: "destructive",
             })
             setIsLoading(false)
           },
         )
 
-        // Inside the fetchData function, after the roomsUnsubscribe setup
+        // Inside the fetchData function, after the typesUnsubscribe setup
         const waitersUnsubscribe = onSnapshot(
           query(collection(db, "users"), where("role", "==", "waiter")),
           (snapshot) => {
@@ -232,8 +273,8 @@ export function TableManagement() {
         )
 
         return () => {
-          tablesUnsubscribe()
-          roomsUnsubscribe()
+          itemsUnsubscribe()
+          typesUnsubscribe()
           // Add this to the return cleanup function
           if (typeof waitersUnsubscribe === "function") {
             waitersUnsubscribe()
@@ -247,204 +288,215 @@ export function TableManagement() {
     }
 
     fetchData()
-  }, [toast])
+  }, [toast, activeTypeTab, newItemType])
 
-  // Fetch tables for a specific room when viewing room tables
-  useEffect(() => {
-    if (!viewingRoomTables) {
-      setRoomTables([])
-      return
-    }
-
-    const fetchRoomTables = async () => {
-      try {
-        const q = query(collection(db, "tables"), where("roomId", "==", viewingRoomTables.id))
-
-        const querySnapshot = await getDocs(q)
-        const roomTablesData: Table[] = []
-
-        querySnapshot.forEach((doc) => {
-          roomTablesData.push({ id: doc.id, ...doc.data() } as Table)
-        })
-
-        // Sort tables by number
-        roomTablesData.sort((a, b) => a.number - b.number)
-        setRoomTables(roomTablesData)
-      } catch (error) {
-        console.error("Error fetching room tables:", error)
-        toast({
-          title: "Xatolik",
-          description: "Xonadagi stollarni yuklashda xatolik yuz berdi",
-          variant: "destructive",
-        })
-      }
-    }
-
-    fetchRoomTables()
-  }, [viewingRoomTables, toast])
-
-  // Filter tables based on selected filters
-  const filteredTables = tables.filter((table) => {
-    const statusMatch = showOccupiedTables ? true : table.status === "available"
-    const roomMatch = !selectedRoomFilter || selectedRoomFilter === "all" ? true : table.roomId === selectedRoomFilter
-    return statusMatch && roomMatch
-  })
-
-  // Filter rooms based on selected filters
-  const filteredRooms = rooms.filter((room) => {
-    return showOccupiedRooms ? true : room.status === "available" || !room.status
-  })
-
-  // Check if a table has an active order
-  const hasActiveOrder = (tableNumber: number) => {
-    return activeOrders.some((order) => order.tableNumber === tableNumber)
-  }
-
-  // Check if a room has an active order
-  const hasActiveRoomOrder = (roomNumber: number) => {
-    return activeOrders.some((order) => order.roomNumber === roomNumber)
-  }
-
-  // Bir stolga berilgan barcha buyurtmalarni ko'rish uchun o'zgartirishlar
-  // table-management.tsx faylidagi getActiveOrderForTable funksiyasini o'zgartiramiz:
-
-  // Get active orders for a table
-  const getActiveOrdersForTable = (tableNumber: number) => {
-    return activeOrders.filter((order) => order.tableNumber === tableNumber)
-  }
-
-  // Get active orders for a room
-  const getActiveOrdersForRoom = (roomNumber: number) => {
-    return activeOrders.filter((order) => order.roomNumber === roomNumber)
-  }
-
-  // hasActiveOrder funksiyasini o'zgartirishsiz qoldiramiz
-  // hasActiveRoomOrder funksiyasini o'zgartirishsiz qoldiramiz
-
-  // Get active order for a table
-  // const getActiveOrderForTable = (tableNumber: number) => {
-  //   return activeOrders.find((order) => order.tableNumber === tableNumber)
-  // }
-
-  // Get active order for a room
-  // const getActiveOrderForRoom = (roomNumber: number) => {
-  //   return activeOrders.find((order) => order.roomNumber === roomNumber)
-  // }
-
-  // Add a single table
-  const handleAddTable = async () => {
-    setIsSubmitting(true)
-
+  // Create default seating types if none exist
+  const createDefaultSeatingTypes = async () => {
     try {
-      // Update the handleAddTable function to include waiterId
-      const tableData = {
-        number: newTableNumber,
-        seats: newTableSeats,
-        status: newTableStatus,
-        roomId: newTableRoomId === "none" ? null : newTableRoomId,
-        waiterId: newTableWaiterId,
-        createdAt: new Date(),
+      // First check if there are any existing types to avoid duplication
+      const typesSnapshot = await getDocs(collection(db, "seatingTypes"))
+      if (!typesSnapshot.empty) {
+        console.log("Seating types already exist, skipping default creation")
+        return
       }
 
-      await addDoc(collection(db, "tables"), tableData)
-
-      setIsAddingTable(false)
-      setNewTableNumber((prev) => prev + 1)
-      setNewTableSeats(4)
-      setNewTableRoomId(null)
-      setNewTableStatus("available")
-      setNewTableWaiterId(null)
-
-      toast({
-        title: "Muvaffaqiyatli",
-        description: "Stol muvaffaqiyatli qo'shildi",
-      })
-    } catch (error) {
-      console.error("Error adding table:", error)
-      toast({
-        title: "Xatolik",
-        description: "Stolni qo'shishda xatolik yuz berdi",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  // Add multiple tables at once
-  const handleBatchAddTables = async () => {
-    setIsSubmitting(true)
-
-    try {
       const batch = writeBatch(db)
 
-      for (let i = 0; i < batchTableCount; i++) {
-        // Update the handleBatchAddTables function to include waiterId
-        const tableData = {
-          number: batchTableStartNumber + i,
-          seats: batchTableSeats,
-          status: "available",
-          roomId: batchTableRoomId === "none" ? null : batchTableRoomId,
-          waiterId: batchTableWaiterId,
-          createdAt: new Date(),
-        }
+      const defaultTypes = [
+        { name: "Stol", defaultCapacity: 4, count: 0 },
+        { name: "Xona", defaultCapacity: 10, count: 0 },
+        { name: "Divan", defaultCapacity: 3, count: 0 },
+        { name: "Kreslo", defaultCapacity: 1, count: 0 },
+      ]
 
-        const newTableRef = doc(collection(db, "tables"))
-        batch.set(newTableRef, tableData)
+      for (const type of defaultTypes) {
+        const typeRef = doc(collection(db, "seatingTypes"))
+        batch.set(typeRef, {
+          ...type,
+          createdAt: new Date(),
+        })
       }
 
       await batch.commit()
 
-      setIsBatchAddingTables(false)
-      setBatchTableStartNumber((prev) => prev + batchTableCount)
-      setBatchTableWaiterId(null)
-
       toast({
-        title: "Muvaffaqiyatli",
-        description: `${batchTableCount} ta stol muvaffaqiyatli qo'shildi`,
+        title: "Standart turlar yaratildi",
+        description: "Standart joy turlari muvaffaqiyatli yaratildi",
       })
     } catch (error) {
-      console.error("Error batch adding tables:", error)
+      console.error("Error creating default seating types:", error)
       toast({
         title: "Xatolik",
-        description: "Stollarni qo'shishda xatolik yuz berdi",
+        description: "Standart joy turlarini yaratishda xatolik yuz berdi",
         variant: "destructive",
       })
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
-  // Edit a table
-  const handleEditTable = async () => {
-    if (!selectedTable) return
+  // Filter seating items based on selected filters
+  const filteredItems = useMemo(() => {
+    return seatingItems.filter((item) => {
+      const statusMatch = showOccupiedItems ? true : item.status === "available"
+      const typeMatch = !selectedTypeFilter || selectedTypeFilter === "all" ? true : item.type === selectedTypeFilter
+      const searchMatch = !searchTerm
+        ? true
+        : item.number.toString().includes(searchTerm) || item.type.toLowerCase().includes(searchTerm.toLowerCase())
+      const capacityMatch = !capacityFilter ? true : item.seats >= capacityFilter
+      const statusFilterMatch = !statusFilter ? true : item.status === statusFilter
+
+      return statusMatch && typeMatch && searchMatch && capacityMatch && statusFilterMatch
+    })
+  }, [seatingItems, showOccupiedItems, selectedTypeFilter, searchTerm, capacityFilter, statusFilter])
+
+  // Group items by type for statistics
+  const itemsByType = useMemo(() => {
+    const result: Record<string, { total: number; available: number; occupied: number; reserved: number }> = {}
+
+    seatingItems.forEach((item) => {
+      if (!result[item.type]) {
+        result[item.type] = { total: 0, available: 0, occupied: 0, reserved: 0 }
+      }
+
+      result[item.type].total++
+
+      if (item.status === "available") {
+        result[item.type].available++
+      } else if (item.status === "occupied") {
+        result[item.type].occupied++
+      } else if (item.status === "reserved") {
+        result[item.type].reserved++
+      }
+    })
+
+    return result
+  }, [seatingItems])
+
+  // Update seating type counts based on actual items
+  useEffect(() => {
+    const updateTypeCounts = async () => {
+      try {
+        // Skip if types or items aren't loaded yet
+        if (isLoading || seatingTypes.length === 0) return
+
+        const batch = writeBatch(db)
+        let updatesNeeded = false
+
+        // Calculate actual counts for each type
+        const actualCounts: Record<string, number> = {}
+        seatingItems.forEach((item) => {
+          if (!actualCounts[item.type]) {
+            actualCounts[item.type] = 0
+          }
+          actualCounts[item.type]++
+        })
+
+        // Update types where count doesn't match
+        for (const type of seatingTypes) {
+          const actualCount = actualCounts[type.name] || 0
+          if (type.count !== actualCount) {
+            updatesNeeded = true
+            const typeRef = doc(db, "seatingTypes", type.id)
+            batch.update(typeRef, {
+              count: actualCount,
+              updatedAt: new Date(),
+            })
+          }
+        }
+
+        // Only commit if there are updates needed
+        if (updatesNeeded) {
+          await batch.commit()
+          console.log("Updated seating type counts to match actual items")
+        }
+      } catch (error) {
+        console.error("Error updating type counts:", error)
+      }
+    }
+
+    updateTypeCounts()
+  }, [seatingItems, seatingTypes, isLoading])
+
+  // Check if an item has an active order
+  const hasActiveOrder = (itemNumber: number, type: string) => {
+    if (type.toLowerCase() === "xona") {
+      return activeOrders.some((order) => order.roomNumber === itemNumber)
+    } else {
+      return activeOrders.some((order) => order.tableNumber === itemNumber && order.seatingType === type)
+    }
+  }
+
+  // Get active orders for an item
+  const getActiveOrdersForItem = (itemNumber: number, type: string) => {
+    if (type.toLowerCase() === "xona") {
+      return activeOrders.filter((order) => order.roomNumber === itemNumber)
+    } else {
+      return activeOrders.filter((order) => order.tableNumber === itemNumber && order.seatingType === type)
+    }
+  }
+
+  // Add a single seating item
+  const handleAddItem = async () => {
     setIsSubmitting(true)
 
     try {
-      // Update the handleEditTable function to include waiterId
-      const tableData = {
-        number: newTableNumber,
-        seats: newTableSeats,
-        status: newTableStatus,
-        roomId: newTableRoomId === "none" ? null : newTableRoomId,
-        waiterId: newTableWaiterId,
+      // Get the default capacity from the selected type
+      const selectedTypeData = seatingTypes.find((t) => t.name === newItemType)
+      const defaultCapacity = selectedTypeData ? selectedTypeData.defaultCapacity : 4
+
+      // Check if an item with this number and type already exists
+      const existingItemsQuery = query(
+        collection(db, "seatingItems"),
+        where("number", "==", newItemNumber),
+        where("type", "==", newItemType),
+      )
+
+      const existingItemsSnapshot = await getDocs(existingItemsQuery)
+
+      if (!existingItemsSnapshot.empty) {
+        toast({
+          title: "Xatolik",
+          description: `${newItemType} #${newItemNumber} allaqachon mavjud. Boshqa raqam tanlang.`,
+          variant: "destructive",
+        })
+        setIsSubmitting(false)
+        return
+      }
+
+      const itemData = {
+        number: newItemNumber,
+        seats: newItemSeats || defaultCapacity,
+        status: newItemStatus,
+        type: newItemType,
+        waiterId: newItemWaiterId,
+        createdAt: new Date(),
         updatedAt: new Date(),
       }
 
-      await updateDoc(doc(db, "tables", selectedTable.id), tableData)
+      await addDoc(collection(db, "seatingItems"), itemData)
 
-      setIsEditingTable(false)
-      setSelectedTable(null)
+      // Update the count for this type
+      if (selectedTypeData) {
+        await updateDoc(doc(db, "seatingTypes", selectedTypeData.id), {
+          count: (selectedTypeData.count || 0) + 1,
+          updatedAt: new Date(),
+        })
+      }
+
+      setIsAddingItem(false)
+      setNewItemNumber((prev) => prev + 1)
+      setNewItemSeats(defaultCapacity)
+      setNewItemStatus("available")
+      setNewItemWaiterId(null)
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Stol muvaffaqiyatli tahrirlandi",
+        description: `${newItemType} #${newItemNumber} muvaffaqiyatli qo'shildi`,
       })
     } catch (error) {
-      console.error("Error editing table:", error)
+      console.error("Error adding seating item:", error)
       toast({
         title: "Xatolik",
-        description: "Stolni tahrirlashda xatolik yuz berdi",
+        description: "Joy elementini qo'shishda xatolik yuz berdi",
         variant: "destructive",
       })
     } finally {
@@ -452,80 +504,250 @@ export function TableManagement() {
     }
   }
 
-  // Delete a table
-  const handleDeleteTable = async (tableId: string) => {
+  // Add multiple seating items at once
+  const handleBatchAddItems = async () => {
+    setIsSubmitting(true)
+
     try {
-      await deleteDoc(doc(db, "tables", tableId))
+      // Instead of using a range query that requires an index, check each number individually
+      const startNumber = batchItemStartNumber
+      const endNumber = batchItemStartNumber + batchItemCount - 1
+      const existingNumbers: number[] = []
+
+      // Check each number individually to avoid needing a composite index
+      for (let i = startNumber; i <= endNumber; i++) {
+        const checkQuery = query(
+          collection(db, "seatingItems"),
+          where("type", "==", batchItemType),
+          where("number", "==", i),
+        )
+
+        const snapshot = await getDocs(checkQuery)
+        if (!snapshot.empty) {
+          existingNumbers.push(i)
+        }
+      }
+
+      if (existingNumbers.length > 0) {
+        toast({
+          title: "Xatolik",
+          description: `Ba'zi raqamlar allaqachon mavjud: ${existingNumbers.join(", ")}. Boshqa boshlang'ich raqam tanlang.`,
+          variant: "destructive",
+        })
+        setIsSubmitting(false)
+        return
+      }
+
+      const batch = writeBatch(db)
+
+      // Get the default capacity from the selected type
+      const selectedTypeData = seatingTypes.find((t) => t.name === batchItemType)
+      const defaultCapacity = selectedTypeData ? selectedTypeData.defaultCapacity : 4
+
+      for (let i = 0; i < batchItemCount; i++) {
+        const itemData = {
+          number: batchItemStartNumber + i,
+          seats: batchItemSeats || defaultCapacity,
+          status: "available",
+          type: batchItemType,
+          waiterId: batchItemWaiterId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+
+        const newItemRef = doc(collection(db, "seatingItems"))
+        batch.set(newItemRef, itemData)
+      }
+
+      await batch.commit()
+
+      // Update the count for this type
+      if (selectedTypeData) {
+        await updateDoc(doc(db, "seatingTypes", selectedTypeData.id), {
+          count: (selectedTypeData.count || 0) + batchItemCount,
+          updatedAt: new Date(),
+        })
+      }
+
+      setIsBatchAddingItems(false)
+      setBatchItemStartNumber((prev) => prev + batchItemCount)
+      setBatchItemWaiterId(null)
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Stol muvaffaqiyatli o'chirildi",
+        description: `${batchItemCount} ta ${batchItemType} muvaffaqiyatli qo'shildi`,
       })
     } catch (error) {
-      console.error("Error deleting table:", error)
+      console.error("Error batch adding seating items:", error)
       toast({
         title: "Xatolik",
-        description: "Stolni o'chirishda xatolik yuz berdi",
+        description: "Joy elementlarini qo'shishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Edit a seating item
+  const handleEditItem = async () => {
+    if (!selectedItem) return
+    setIsSubmitting(true)
+
+    try {
+      // Check if type has changed
+      const oldType = selectedItem.type
+      const newType = newItemType
+      const typeChanged = oldType !== newType
+
+      const itemData = {
+        number: newItemNumber,
+        seats: newItemSeats,
+        status: newItemStatus,
+        type: newItemType,
+        waiterId: newItemWaiterId,
+        updatedAt: new Date(),
+      }
+
+      await updateDoc(doc(db, "seatingItems", selectedItem.id), itemData)
+
+      // If type has changed, update counts for both old and new types
+      if (typeChanged) {
+        const batch = writeBatch(db)
+
+        // Decrease count for old type
+        const oldTypeData = seatingTypes.find((t) => t.name === oldType)
+        if (oldTypeData && oldTypeData.count > 0) {
+          const oldTypeRef = doc(db, "seatingTypes", oldTypeData.id)
+          batch.update(oldTypeRef, {
+            count: oldTypeData.count - 1,
+            updatedAt: new Date(),
+          })
+        }
+
+        // Increase count for new type
+        const newTypeData = seatingTypes.find((t) => t.name === newType)
+        if (newTypeData) {
+          const newTypeRef = doc(db, "seatingTypes", newTypeData.id)
+          batch.update(newTypeRef, {
+            count: (newTypeData.count || 0) + 1,
+            updatedAt: new Date(),
+          })
+        }
+
+        await batch.commit()
+      }
+
+      setIsEditingItem(false)
+      setSelectedItem(null)
+
+      toast({
+        title: "Muvaffaqiyatli",
+        description: `${newItemType} muvaffaqiyatli tahrirlandi`,
+      })
+    } catch (error) {
+      console.error("Error editing seating item:", error)
+      toast({
+        title: "Xatolik",
+        description: "Joy elementini tahrirlashda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Delete a seating item
+  const handleDeleteItem = async (itemId: string, type: string) => {
+    try {
+      await deleteDoc(doc(db, "seatingItems", itemId))
+
+      // Update the count for this type
+      const selectedTypeData = seatingTypes.find((t) => t.name === type)
+      if (selectedTypeData && selectedTypeData.count > 0) {
+        await updateDoc(doc(db, "seatingTypes", selectedTypeData.id), {
+          count: selectedTypeData.count - 1,
+          updatedAt: new Date(),
+        })
+      }
+
+      toast({
+        title: "Muvaffaqiyatli",
+        description: `${type} muvaffaqiyatli o'chirildi`,
+      })
+    } catch (error) {
+      console.error("Error deleting seating item:", error)
+      toast({
+        title: "Xatolik",
+        description: "Joy elementini o'chirishda xatolik yuz berdi",
         variant: "destructive",
       })
     }
   }
 
-  // Toggle table status
-  const handleToggleTableStatus = async (table: Table) => {
+  // Toggle item status
+  const handleToggleItemStatus = async (item: SeatingItem) => {
     try {
-      const newStatus = table.status === "available" ? "occupied" : "available"
+      const newStatus = item.status === "available" ? "occupied" : "available"
 
-      await updateDoc(doc(db, "tables", table.id), {
+      await updateDoc(doc(db, "seatingItems", item.id), {
         status: newStatus,
         updatedAt: new Date(),
       })
 
       toast({
         title: "Status yangilandi",
-        description: `Stol statusi ${newStatus === "available" ? "bo'sh" : "band"} qilindi`,
+        description: `${item.type} statusi ${newStatus === "available" ? "bo'sh" : "band"} qilindi`,
       })
     } catch (error) {
-      console.error("Error toggling table status:", error)
+      console.error("Error toggling item status:", error)
       toast({
         title: "Xatolik",
-        description: "Stol statusini yangilashda xatolik yuz berdi",
+        description: "Joy elementi statusini yangilashda xatolik yuz berdi",
         variant: "destructive",
       })
     }
   }
 
-  // Add a room
-  const handleAddRoom = async () => {
+  // Add a seating type
+  const handleAddType = async () => {
     setIsSubmitting(true)
 
     try {
-      // Update the handleAddRoom function to include waiterId
-      const roomData = {
-        number: newRoomNumber,
-        capacity: newRoomCapacity,
-        status: newRoomStatus,
-        waiterId: newRoomWaiterId,
+      // Check if type with this name already exists
+      const existingType = seatingTypes.find((t) => t.name.toLowerCase() === newTypeName.toLowerCase())
+      if (existingType) {
+        toast({
+          title: "Xatolik",
+          description: `"${newTypeName}" nomli joy turi allaqachon mavjud`,
+          variant: "destructive",
+        })
+        setIsSubmitting(false)
+        return
+      }
+
+      const typeData = {
+        name: newTypeName,
+        defaultCapacity: newTypeCapacity,
+        count: 0,
         createdAt: new Date(),
       }
 
-      await addDoc(collection(db, "rooms"), roomData)
+      await addDoc(collection(db, "seatingTypes"), typeData)
 
-      setIsAddingRoom(false)
-      setNewRoomNumber((prev) => prev + 1)
-      setNewRoomCapacity(20)
-      setNewRoomStatus("available")
-      setNewRoomWaiterId(null)
+      setIsAddingType(false)
+      setNewTypeName("")
+      setNewTypeCapacity(4)
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Xona muvaffaqiyatli qo'shildi",
+        description: "Joy turi muvaffaqiyatli qo'shildi",
       })
     } catch (error) {
-      console.error("Error adding room:", error)
+      console.error("Error adding seating type:", error)
       toast({
         title: "Xatolik",
-        description: "Xonani qo'shishda xatolik yuz berdi",
+        description: "Joy turini qo'shishda xatolik yuz berdi",
         variant: "destructive",
       })
     } finally {
@@ -533,35 +755,61 @@ export function TableManagement() {
     }
   }
 
-  // Edit a room
-  const handleEditRoom = async () => {
-    if (!selectedRoom) return
+  // Edit a seating type
+  const handleEditType = async () => {
+    if (!selectedType) return
     setIsSubmitting(true)
 
     try {
-      // Update the handleEditRoom function to include waiterId
-      const roomData = {
-        number: newRoomNumber,
-        capacity: newRoomCapacity,
-        status: newRoomStatus,
-        waiterId: newRoomWaiterId,
+      // Check if another type with this name already exists
+      const existingType = seatingTypes.find(
+        (t) => t.name.toLowerCase() === newTypeName.toLowerCase() && t.id !== selectedType.id,
+      )
+
+      if (existingType) {
+        toast({
+          title: "Xatolik",
+          description: `"${newTypeName}" nomli joy turi allaqachon mavjud`,
+          variant: "destructive",
+        })
+        setIsSubmitting(false)
+        return
+      }
+
+      const typeData = {
+        name: newTypeName,
+        defaultCapacity: newTypeCapacity,
         updatedAt: new Date(),
       }
 
-      await updateDoc(doc(db, "rooms", selectedRoom.id), roomData)
+      await updateDoc(doc(db, "seatingTypes", selectedType.id), typeData)
 
-      setIsEditingRoom(false)
-      setSelectedRoom(null)
+      // Update all items of this type with the new name
+      const itemsToUpdate = seatingItems.filter((item) => item.type === selectedType.name)
+
+      if (itemsToUpdate.length > 0) {
+        const batch = writeBatch(db)
+
+        itemsToUpdate.forEach((item) => {
+          const itemRef = doc(db, "seatingItems", item.id)
+          batch.update(itemRef, { type: newTypeName })
+        })
+
+        await batch.commit()
+      }
+
+      setIsEditingType(false)
+      setSelectedType(null)
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Xona muvaffaqiyatli tahrirlandi",
+        description: "Joy turi muvaffaqiyatli tahrirlandi",
       })
     } catch (error) {
-      console.error("Error editing room:", error)
+      console.error("Error editing seating type:", error)
       toast({
         title: "Xatolik",
-        description: "Xonani tahrirlashda xatolik yuz berdi",
+        description: "Joy turini tahrirlashda xatolik yuz berdi",
         variant: "destructive",
       })
     } finally {
@@ -569,79 +817,48 @@ export function TableManagement() {
     }
   }
 
-  // Delete a room
-  const handleDeleteRoom = async (roomId: string) => {
+  // Delete a seating type
+  const handleDeleteType = async (typeId: string, typeName: string) => {
     try {
-      // Check if there are tables in this room
-      const tablesInRoom = tables.filter((table) => table.roomId === roomId)
+      // Check if there are items of this type
+      const itemsOfType = seatingItems.filter((item) => item.type === typeName)
 
-      if (tablesInRoom.length > 0) {
+      if (itemsOfType.length > 0) {
         toast({
           title: "Xatolik",
-          description: "Bu xonada stollar mavjud. Avval stollarni o'chiring yoki boshqa xonaga o'tkazing.",
+          description: `Bu turda ${itemsOfType.length} ta element mavjud. Avval elementlarni o'chiring yoki boshqa turga o'tkazing.`,
           variant: "destructive",
         })
         return
       }
 
-      await deleteDoc(doc(db, "rooms", roomId))
+      await deleteDoc(doc(db, "seatingTypes", typeId))
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Xona muvaffaqiyatli o'chirildi",
+        description: "Joy turi muvaffaqiyatli o'chirildi",
       })
     } catch (error) {
-      console.error("Error deleting room:", error)
+      console.error("Error deleting seating type:", error)
       toast({
         title: "Xatolik",
-        description: "Xonani o'chirishda xatolik yuz berdi",
+        description: "Joy turini o'chirishda xatolik yuz berdi",
         variant: "destructive",
       })
     }
   }
 
-  // Toggle room status
-  const handleToggleRoomStatus = async (room: Room) => {
-    try {
-      const newStatus = room.status === "occupied" ? "available" : "occupied"
-
-      await updateDoc(doc(db, "rooms", room.id), {
-        status: newStatus,
-        updatedAt: new Date(),
-      })
-
-      toast({
-        title: "Status yangilandi",
-        description: `Xona statusi ${newStatus === "available" ? "bo'sh" : "band"} qilindi`,
-      })
-    } catch (error) {
-      console.error("Error toggling room status:", error)
-      toast({
-        title: "Xatolik",
-        description: "Xona statusini yangilashda xatolik yuz berdi",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // Get room name by ID
-  const getRoomName = (roomId: string | null | undefined) => {
-    if (!roomId) return "Xonasiz"
-    const room = rooms.find((r) => r.id === roomId)
-    return room ? `${room.number} xona` : "Xonasiz"
-  }
-
-  // Reset all tables to available
-  const handleResetAllTables = async () => {
+  // Reset all items to available
+  const handleResetAllItems = async () => {
     setIsSubmitting(true)
 
     try {
       const batch = writeBatch(db)
 
-      tables.forEach((table) => {
-        if (table.status !== "available") {
-          const tableRef = doc(db, "tables", table.id)
-          batch.update(tableRef, {
+      seatingItems.forEach((item) => {
+        if (item.status !== "available") {
+          const itemRef = doc(db, "seatingItems", item.id)
+          batch.update(itemRef, {
             status: "available",
             updatedAt: new Date(),
           })
@@ -652,47 +869,14 @@ export function TableManagement() {
 
       toast({
         title: "Muvaffaqiyatli",
-        description: "Barcha stollar bo'sh holatga o'tkazildi",
+        description: "Barcha joy elementlari bo'sh holatga o'tkazildi",
       })
     } catch (error) {
-      console.error("Error resetting tables:", error)
+      console.error("Error resetting items:", error)
       toast({
         title: "Xatolik",
-        description: "Stollarni qayta o'rnatishda xatolik yuz berdi",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  // Reset all rooms to available
-  const handleResetAllRooms = async () => {
-    setIsSubmitting(true)
-
-    try {
-      const batch = writeBatch(db)
-
-      rooms.forEach((room) => {
-        if (room.status === "occupied") {
-          const roomRef = doc(db, "rooms", room.id)
-          batch.update(roomRef, {
-            status: "available",
-            updatedAt: new Date(),
-          })
-        }
-      })
-
-      await batch.commit()
-
-      toast({
-        title: "Muvaffaqiyatli",
-        description: "Barcha xonalar bo'sh holatga o'tkazildi",
-      })
-    } catch (error) {
-      console.error("Error resetting rooms:", error)
-      toast({
-        title: "Xatolik",
-        description: "Xonalarni qayta o'rnatishda xatolik yuz berdi",
+        description: "Joy elementlarini qayta o'rnatishda xatolik yuz berdi",
+        variant: "destructive",
       })
     } finally {
       setIsSubmitting(false)
@@ -732,10 +916,142 @@ export function TableManagement() {
     return waiter ? waiter.name : "Belgilanmagan"
   }
 
+  // Handle select all checkbox
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedItems([])
+    } else {
+      setSelectedItems(filteredItems.map((item) => item.id))
+    }
+    setSelectAll(!selectAll)
+  }
+
+  // Handle individual item selection
+  const handleSelectItem = (itemId: string) => {
+    if (selectedItems.includes(itemId)) {
+      setSelectedItems(selectedItems.filter((id) => id !== itemId))
+    } else {
+      setSelectedItems([...selectedItems, itemId])
+    }
+  }
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) return
+
+    try {
+      const batch = writeBatch(db)
+
+      // Group items by type to update type counts
+      const typeCountsToUpdate: Record<string, number> = {}
+
+      selectedItems.forEach((itemId) => {
+        const item = seatingItems.find((i) => i.id === itemId)
+        if (item) {
+          // Add to type counts
+          if (!typeCountsToUpdate[item.type]) {
+            typeCountsToUpdate[item.type] = 0
+          }
+          typeCountsToUpdate[item.type]++
+
+          // Delete the item
+          const itemRef = doc(db, "seatingItems", itemId)
+          batch.delete(itemRef)
+        }
+      })
+
+      // Update type counts
+      for (const [typeName, count] of Object.entries(typeCountsToUpdate)) {
+        const typeDoc = seatingTypes.find((t) => t.name === typeName)
+        if (typeDoc && typeDoc.count >= count) {
+          const typeRef = doc(db, "seatingTypes", typeDoc.id)
+          batch.update(typeRef, {
+            count: typeDoc.count - count,
+            updatedAt: new Date(),
+          })
+        }
+      }
+
+      await batch.commit()
+
+      toast({
+        title: "Muvaffaqiyatli",
+        description: `${selectedItems.length} ta element muvaffaqiyatli o'chirildi`,
+      })
+
+      setSelectedItems([])
+      setSelectAll(false)
+    } catch (error) {
+      console.error("Error bulk deleting items:", error)
+      toast({
+        title: "Xatolik",
+        description: "Elementlarni o'chirishda xatolik yuz berdi",
+      })
+    }
+  }
+
+  // Export data to CSV
+  const handleExportData = () => {
+    try {
+      // Create CSV content
+      let csvContent = "Type,Number,Seats,Status,Waiter\n"
+
+      filteredItems.forEach((item) => {
+        csvContent += `${item.type},${item.number},${item.seats},${item.status},${getWaiterName(item.waiterId)}\n`
+      })
+
+      // Create download link
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.setAttribute("href", url)
+      link.setAttribute("download", `seating-items-${new Date().toISOString().split("T")[0]}.csv`)
+      link.style.visibility = "hidden"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+      toast({
+        title: "Muvaffaqiyatli",
+        description: "Ma'lumotlar CSV formatida yuklab olindi",
+      })
+    } catch (error) {
+      console.error("Error exporting data:", error)
+      toast({
+        title: "Xatolik",
+        description: "Ma'lumotlarni eksport qilishda xatolik yuz berdi",
+      })
+    }
+  }
+
+  // Get icon for seating type
+  const getTypeIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case "stol":
+        return <TableIcon className="h-4 w-4" />
+      case "xona":
+        return <Home className="h-4 w-4" />
+      case "divan":
+        return <Sofa className="h-4 w-4" />
+      case "kreslo":
+        return <Armchair className="h-4 w-4" />
+      default:
+        return <LayoutGrid className="h-4 w-4" />
+    }
+  }
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchTerm("")
+    setStatusFilter(null)
+    setCapacityFilter(null)
+    setSelectedTypeFilter(null)
+  }
+
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Stollar va xonalar boshqaruvi</h1>
+        <h1 className="text-2xl font-bold">Joy elementlari boshqaruvi</h1>
 
         <div className="flex gap-2">
           <AlertDialog>
@@ -747,233 +1063,152 @@ export function TableManagement() {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Barcha stollar va xonalarni qayta o'rnatish</AlertDialogTitle>
+                <AlertDialogTitle>Barcha joy elementlarini qayta o'rnatish</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Bu amal barcha stollar va xonalarni bo'sh holatga o'tkazadi. Bu amalni qaytarib bo'lmaydi.
+                  Bu amal barcha joy elementlarini bo'sh holatga o'tkazadi. Bu amalni qaytarib bo'lmaydi.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Bekor qilish</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    handleResetAllTables()
-                    handleResetAllRooms()
-                  }}
-                >
-                  Qayta o'rnatish
-                </AlertDialogAction>
+                <AlertDialogAction onClick={handleResetAllItems}>Qayta o'rnatish</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
         </div>
       </div>
 
-      {viewingRoomTables ? (
-        // Room tables view
-        <div>
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => setViewingRoomTables(null)}>
-                ← Orqaga
-              </Button>
-              <h2 className="text-xl font-semibold">
-                {viewingRoomTables.number} xona ({viewingRoomTables.capacity} kishilik) - Stollar
-              </h2>
-              <Badge
-                className={
-                  viewingRoomTables.status === "occupied" ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
-                }
-              >
-                {viewingRoomTables.status === "occupied" ? "Band" : "Bo'sh"}
-              </Badge>
+      <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-6 grid w-full grid-cols-2">
+          <TabsTrigger value="table-view" className="flex items-center gap-2">
+            <TableIcon className="h-4 w-4" />
+            Jadval ko'rinishi
+          </TabsTrigger>
+          <TabsTrigger value="types" className="flex items-center gap-2">
+            <LayoutGrid className="h-4 w-4" />
+            Joy turlari
+          </TabsTrigger>
+        </TabsList>
 
-              {hasActiveRoomOrder(viewingRoomTables.number) && (
-                <Badge
-                  className="bg-blue-100 text-blue-800 cursor-pointer"
-                  onClick={() => {
-                    const orders = getActiveOrdersForRoom(viewingRoomTables.number)
-                    if (orders.length > 0) setViewingOrderDetails(orders)
-                  }}
-                >
-                  <ClipboardList className="mr-1 h-3 w-3" />
-                  Faol buyurtma
-                </Badge>
-              )}
+        {/* Table View Tab */}
+
+        <TabsContent value="table-view">
+          <div className="mb-6 space-y-4">
+            {/* Search and filters */}
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Qidirish..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
+              <Select
+                value={statusFilter || "all"}
+                onValueChange={(value) => setStatusFilter(value === "all" ? null : value)}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Barcha statuslar</SelectItem>
+                  <SelectItem value="available">Bo'sh</SelectItem>
+                  <SelectItem value="occupied">Band</SelectItem>
+                  <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={capacityFilter ? capacityFilter.toString() : "all"}
+                onValueChange={(value) => setCapacityFilter(value === "all" ? null : Number.parseInt(value))}
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Sig'imi" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Barcha sig'imlar</SelectItem>
+                  <SelectItem value="1">1+ kishi</SelectItem>
+                  <SelectItem value="2">2+ kishi</SelectItem>
+                  <SelectItem value="4">4+ kishi</SelectItem>
+                  <SelectItem value="6">6+ kishi</SelectItem>
+                  <SelectItem value="10">10+ kishi</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button variant="ghost" size="icon" onClick={clearFilters} title="Filtrlarni tozalash">
+                <X className="h-4 w-4" />
+              </Button>
             </div>
 
-            <div className="flex gap-2">
-              <Dialog open={isAddingTable} onOpenChange={setIsAddingTable}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Stol qo'shish
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Xonaga stol qo'shish</DialogTitle>
-                    <DialogDescription>{viewingRoomTables.number} xonaga yangi stol qo'shish</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="tableNumber">Stol raqami</Label>
-                        <Input
-                          id="tableNumber"
-                          type="number"
-                          value={newTableNumber}
-                          onChange={(e) => setNewTableNumber(Number.parseInt(e.target.value) || 1)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="tableSeats">O'rinlar soni</Label>
-                        <Input
-                          id="tableSeats"
-                          type="number"
-                          value={newTableSeats}
-                          onChange={(e) => setNewTableSeats(Number.parseInt(e.target.value) || 4)}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tableStatus">Status</Label>
-                      <Select
-                        value={newTableStatus}
-                        onValueChange={(value) => setNewTableStatus(value as "available" | "occupied" | "reserved")}
-                      >
-                        <SelectTrigger id="tableStatus">
-                          <SelectValue placeholder="Status tanlang" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="available">Bo'sh</SelectItem>
-                          <SelectItem value="occupied">Band</SelectItem>
-                          <SelectItem value="reserved">Rezerv qilingan</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tableWaiter">Ofitsiant</Label>
-                      <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
-                        <SelectTrigger id="tableWaiter">
-                          <SelectValue placeholder="Ofitsiantni tanlang" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Belgilanmagan</SelectItem>
-                          {waiters.map((waiter) => (
-                            <SelectItem key={waiter.id} value={waiter.id}>
-                              {waiter.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsAddingTable(false)} disabled={isSubmitting}>
-                      Bekor qilish
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        setNewTableRoomId(viewingRoomTables.id)
-                        handleAddTable()
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Qo'shilmoqda...
-                        </>
-                      ) : (
-                        "Qo'shish"
-                      )}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+            {/* Actions toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center space-x-2">
+                  <Switch id="show-occupied" checked={showOccupiedItems} onCheckedChange={setShowOccupiedItems} />
+                  <Label htmlFor="show-occupied">Band joylarni ko'rsatish</Label>
+                </div>
 
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button variant="outline">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Ko'p stollar qo'shish
+                {selectedItems.length > 0 && (
+                  <Button variant="destructive" size="sm" onClick={handleBulkDelete} className="ml-4">
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {selectedItems.length} ta elementni o'chirish
                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Xonaga ko'p stollar qo'shish</DialogTitle>
-                    <DialogDescription>{viewingRoomTables.number} xonaga bir nechta stol qo'shish</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="batchStartNumber">Boshlang'ich raqam</Label>
-                        <Input
-                          id="batchStartNumber"
-                          type="number"
-                          value={batchTableStartNumber}
-                          onChange={(e) => setBatchTableStartNumber(Number.parseInt(e.target.value) || 1)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="batchCount">Stollar soni</Label>
-                        <Input
-                          id="batchCount"
-                          type="number"
-                          value={batchTableCount}
-                          onChange={(e) => setBatchTableCount(Number.parseInt(e.target.value) || 1)}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="batchSeats">O'rinlar soni</Label>
-                      <Input
-                        id="batchSeats"
-                        type="number"
-                        value={batchTableSeats}
-                        onChange={(e) => setBatchTableSeats(Number.parseInt(e.target.value) || 4)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="batchWaiter">Ofitsiant</Label>
-                      <Select value={batchTableWaiterId || "none"} onValueChange={setBatchTableWaiterId}>
-                        <SelectTrigger id="batchWaiter">
-                          <SelectValue placeholder="Ofitsiantni tanlang" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Belgilanmagan</SelectItem>
-                          {waiters.map((waiter) => (
-                            <SelectItem key={waiter.id} value={waiter.id}>
-                              {waiter.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsBatchAddingTables(false)} disabled={isSubmitting}>
-                      Bekor qilish
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Amallar
                     </Button>
-                    <Button
-                      onClick={() => {
-                        setBatchTableRoomId(viewingRoomTables.id)
-                        handleBatchAddTables()
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Qo'shilmoqda...
-                        </>
-                      ) : (
-                        "Qo'shish"
-                      )}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Ma'lumotlar</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={handleExportData}>
+                      <Download className="mr-2 h-4 w-4" />
+                      CSV formatida yuklab olish
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Boshqarish</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => setIsAddingItem(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Yangi element qo'shish
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setIsBatchAddingItems(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Ko'p elementlar qo'shish
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button onClick={() => setIsAddingItem(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Element qo'shish
+                </Button>
+              </div>
+            </div>
+
+            {/* Statistics cards */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(itemsByType).map(([type, stats]) => (
+                <Card key={type}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">{type}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.total}</div>
+                    <div className="mt-1 flex items-center text-xs text-muted-foreground">
+                      <span className="text-green-500 mr-1">{stats.available} bo'sh</span> •
+                      <span className="text-red-500 mx-1">{stats.occupied} band</span> •
+                      <span className="text-amber-500 ml-1">{stats.reserved} rezerv</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
 
@@ -982,834 +1217,691 @@ export function TableManagement() {
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {roomTables.length === 0 ? (
-                <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
-                  <p className="text-muted-foreground">Bu xonada stollar topilmadi</p>
-                </div>
-              ) : (
-                roomTables.map((table) => (
-                  <Card
-                    key={table.id}
-                    className={`overflow-hidden ${
-                      table.status === "occupied"
-                        ? "border-red-500"
-                        : table.status === "reserved"
-                          ? "border-amber-500"
-                          : ""
-                    }`}
-                  >
-                    <CardHeader className="bg-muted/50 p-4">
-                      <CardTitle className="flex items-center justify-between">
-                        <span>{table.number} stol</span>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setSelectedTable(table)
-                              setNewTableNumber(table.number)
-                              setNewTableSeats(table.seats)
-                              setNewTableRoomId(table.roomId || null)
-                              setNewTableStatus(table.status)
-                              setNewTableWaiterId(table.waiterId || null)
-                              setIsEditingTable(true)
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteTable(table.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </CardTitle>
-                      <CardDescription>{table.seats} kishilik</CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Status:</span>
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            className={`${
-                              table.status === "available"
-                                ? "bg-green-100 text-green-800"
-                                : table.status === "occupied"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-amber-100 text-amber-800"
-                            }`}
-                          >
-                            {table.status === "available"
-                              ? "Bo'sh"
-                              : table.status === "occupied"
-                                ? "Band"
-                                : "Rezerv qilingan"}
-                          </Badge>
-                          <Switch
-                            checked={table.status === "available"}
-                            onCheckedChange={() => handleToggleTableStatus(table)}
+            <Tabs defaultValue={seatingTypes.length > 0 ? seatingTypes[0].name.toLowerCase() : "all"}>
+              <TabsList className="mb-4">
+                <TabsTrigger value="all" className="flex items-center gap-2">
+                  <LayoutGrid className="h-4 w-4" />
+                  Barcha turlar
+                </TabsTrigger>
+                {seatingTypes.map((type) => (
+                  <TabsTrigger key={type.id} value={type.name.toLowerCase()} className="flex items-center gap-2">
+                    {getTypeIcon(type.name)}
+                    {type.name}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              <TabsContent value="all">
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[50px]">
+                          <Checkbox
+                            checked={selectAll}
+                            onCheckedChange={handleSelectAll}
+                            aria-label="Barchasini tanlash"
                           />
-                        </div>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Ofitsiant:</span>
-                        <span className="text-sm">{getWaiterName(table.waiterId)}</span>
-                      </div>
-
-                      {hasActiveOrder(table.number) && (
-                        <div className="mt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full"
-                            onClick={() => {
-                              const orders = getActiveOrdersForTable(table.number)
-                              if (orders.length > 0) setViewingOrderDetails(orders)
-                            }}
-                          >
-                            <ClipboardList className="mr-2 h-4 w-4" />
-                            Buyurtmani ko'rish
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      ) : viewingOrderDetails ? (
-        // Order details view
-        <div>
-          <div className="mb-4 flex items-center">
-            <Button variant="outline" onClick={() => setViewingOrderDetails(null)}>
-              ← Orqaga
-            </Button>
-            <h2 className="ml-4 text-xl font-semibold">
-              {viewingOrderDetails[0].roomNumber
-                ? `Xona #${viewingOrderDetails[0].roomNumber} buyurtmalari`
-                : `Stol #${viewingOrderDetails[0].tableNumber} buyurtmalari`}
-            </h2>
-          </div>
-
-          <div className="space-y-4">
-            {viewingOrderDetails.map((order, index) => (
-              <Card key={index}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Buyurtma #{index + 1}</CardTitle>
-                    <Badge className="bg-blue-500">{getStatusText(order.status)}</Badge>
-                  </div>
-                  <CardDescription>Buyurtma vaqti: {formatDate(order.createdAt)}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="font-medium">Taomlar:</h3>
-                      <ul className="mt-2 space-y-2">
-                        {order.items.map((item, idx) => (
-                          <li key={idx} className="flex justify-between">
-                            <span>
-                              {item.name} × {item.quantity}
-                            </span>
-                            <span>{formatCurrency(item.price * item.quantity)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="flex justify-between border-t pt-2">
-                      <span className="font-semibold">Jami:</span>
-                      <span className="font-semibold">{formatCurrency(order.total)}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 grid w-full grid-cols-2">
-            <TabsTrigger value="tables" className="flex items-center gap-2">
-              <LayoutGrid className="h-4 w-4" />
-              Stollar
-            </TabsTrigger>
-            <TabsTrigger value="rooms" className="flex items-center gap-2">
-              <Home className="h-4 w-4" />
-              Xonalar
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Tables Tab */}
-          <TabsContent value="tables">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center space-x-2 mr-4">
-                  <Switch id="show-occupied" checked={showOccupiedTables} onCheckedChange={setShowOccupiedTables} />
-                  <Label htmlFor="show-occupied">Band stollarni ko'rsatish</Label>
-                </div>
-
-                {rooms.length > 0 && (
-                  <Select value={selectedRoomFilter || "all"} onValueChange={setSelectedRoomFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Xonani tanlang" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Barcha xonalar</SelectItem>
-                      {rooms.map((room) => (
-                        <SelectItem key={room.id} value={room.id}>
-                          {room.number} xona
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <Dialog open={isAddingTable} onOpenChange={setIsAddingTable}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Stol qo'shish
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Yangi stol qo'shish</DialogTitle>
-                      <DialogDescription>Stol ma'lumotlarini kiriting</DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="tableNumber">Stol raqami</Label>
-                          <Input
-                            id="tableNumber"
-                            type="number"
-                            value={newTableNumber}
-                            onChange={(e) => setNewTableNumber(Number.parseInt(e.target.value) || 1)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="tableSeats">O'rinlar soni</Label>
-                          <Input
-                            id="tableSeats"
-                            type="number"
-                            value={newTableSeats}
-                            onChange={(e) => setNewTableSeats(Number.parseInt(e.target.value) || 4)}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="tableRoom">Xona</Label>
-                        <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
-                          <SelectTrigger id="tableRoom">
-                            <SelectValue placeholder="Xonani tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Xonasiz</SelectItem>
-                            {rooms.map((room) => (
-                              <SelectItem key={room.id} value={room.id}>
-                                {room.number} xona
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="tableStatus">Status</Label>
-                        <Select
-                          value={newTableStatus}
-                          onValueChange={(value) => setNewTableStatus(value as "available" | "occupied" | "reserved")}
-                        >
-                          <SelectTrigger id="tableStatus">
-                            <SelectValue placeholder="Status tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="available">Bo'sh</SelectItem>
-                            <SelectItem value="occupied">Band</SelectItem>
-                            <SelectItem value="reserved">Rezerv qilingan</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="tableWaiter">Ofitsiant</Label>
-                        <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
-                          <SelectTrigger id="tableWaiter">
-                            <SelectValue placeholder="Ofitsiantni tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Belgilanmagan</SelectItem>
-                            {waiters.map((waiter) => (
-                              <SelectItem key={waiter.id} value={waiter.id}>
-                                {waiter.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsAddingTable(false)} disabled={isSubmitting}>
-                        Bekor qilish
-                      </Button>
-                      <Button onClick={handleAddTable} disabled={isSubmitting}>
-                        {isSubmitting ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Qo'shilmoqda...
-                          </>
-                        ) : (
-                          "Qo'shish"
-                        )}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-
-                <Dialog open={isBatchAddingTables} onOpenChange={setIsBatchAddingTables}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Ko'p stollar qo'shish
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Ko'p stollar qo'shish</DialogTitle>
-                      <DialogDescription>Bir vaqtda bir nechta stol qo'shish</DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="batchStartNumber">Boshlang'ich raqam</Label>
-                          <Input
-                            id="batchStartNumber"
-                            type="number"
-                            value={batchTableStartNumber}
-                            onChange={(e) => setBatchTableStartNumber(Number.parseInt(e.target.value) || 1)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="batchCount">Stollar soni</Label>
-                          <Input
-                            id="batchCount"
-                            type="number"
-                            value={batchTableCount}
-                            onChange={(e) => setBatchTableCount(Number.parseInt(e.target.value) || 1)}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="batchSeats">O'rinlar soni</Label>
-                        <Input
-                          id="batchSeats"
-                          type="number"
-                          value={batchTableSeats}
-                          onChange={(e) => setBatchTableSeats(Number.parseInt(e.target.value) || 4)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="batchWaiter">Ofitsiant</Label>
-                        <Select value={batchTableWaiterId || "none"} onValueChange={setBatchTableWaiterId}>
-                          <SelectTrigger id="batchWaiter">
-                            <SelectValue placeholder="Xonani tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Belgilanmagan</SelectItem>
-                            {waiters.map((waiter) => (
-                              <SelectItem key={waiter.id} value={waiter.id}>
-                                {waiter.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsBatchAddingTables(false)} disabled={isSubmitting}>
-                        Bekor qilish
-                      </Button>
-                      <Button onClick={handleBatchAddTables} disabled={isSubmitting}>
-                        {isSubmitting ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Qo'shilmoqda...
-                          </>
-                        ) : (
-                          "Qo'shish"
-                        )}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </div>
-
-            {isLoading ? (
-              <div className="flex h-60 items-center justify-center">
-                <Loader2 className="h-10 w-10 animate-spin text-primary" />
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredTables.length === 0 ? (
-                  <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
-                    <p className="text-muted-foreground">Stollar topilmadi</p>
-                  </div>
-                ) : (
-                  filteredTables.map((table) => (
-                    <Card
-                      key={table.id}
-                      className={`overflow-hidden ${
-                        table.status === "occupied"
-                          ? "border-red-500"
-                          : table.status === "reserved"
-                            ? "border-amber-500"
-                            : ""
-                      }`}
-                    >
-                      <CardHeader className="bg-muted/50 p-4">
-                        <CardTitle className="flex items-center justify-between">
-                          <span>{table.number} stol</span>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setSelectedTable(table)
-                                setNewTableNumber(table.number)
-                                setNewTableSeats(table.seats)
-                                setNewTableRoomId(table.roomId || null)
-                                setNewTableStatus(table.status)
-                                setNewTableWaiterId(table.waiterId || null)
-                                setIsEditingTable(true)
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteTable(table.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </CardTitle>
-                        <CardDescription>
-                          {table.seats} kishilik
-                          {table.roomId && ` • ${getRoomName(table.roomId)}`}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Status:</span>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              className={`${
-                                table.status === "available"
-                                  ? "bg-green-100 text-green-800"
-                                  : table.status === "occupied"
-                                    ? "bg-red-100 text-red-800"
-                                    : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              {table.status === "available"
-                                ? "Bo'sh"
-                                : table.status === "occupied"
-                                  ? "Band"
-                                  : "Rezerv qilingan"}
-                            </Badge>
-                            <Switch
-                              checked={table.status === "available"}
-                              onCheckedChange={() => handleToggleTableStatus(table)}
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Ofitsiant:</span>
-                          <span className="text-sm">{getWaiterName(table.waiterId)}</span>
-                        </div>
-
-                        {hasActiveOrder(table.number) && (
-                          <div className="mt-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => {
-                                const orders = getActiveOrdersForTable(table.number)
-                                if (orders.length > 0) setViewingOrderDetails(orders)
-                              }}
-                            >
-                              <ClipboardList className="mr-2 h-4 w-4" />
-                              Buyurtmani ko'rish
-                            </Button>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Edit Table Dialog */}
-            <Dialog open={isEditingTable} onOpenChange={setIsEditingTable}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Stolni tahrirlash</DialogTitle>
-                  <DialogDescription>Stol ma'lumotlarini o'zgartiring</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="editTableNumber">Stol raqami</Label>
-                      <Input
-                        id="editTableNumber"
-                        type="number"
-                        value={newTableNumber}
-                        onChange={(e) => setNewTableNumber(Number.parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="editTableSeats">O'rinlar soni</Label>
-                      <Input
-                        id="editTableSeats"
-                        type="number"
-                        value={newTableSeats}
-                        onChange={(e) => setNewTableSeats(Number.parseInt(e.target.value) || 4)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editTableRoom">Xona</Label>
-                    <Select value={newTableRoomId || "none"} onValueChange={setNewTableRoomId}>
-                      <SelectTrigger id="editTableRoom">
-                        <SelectValue placeholder="Xonani tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Xonasiz</SelectItem>
-                        {rooms.map((room) => (
-                          <SelectItem key={room.id} value={room.id}>
-                            {room.number} xona
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editTableStatus">Status</Label>
-                    <Select
-                      value={newTableStatus}
-                      onValueChange={(value) => setNewTableStatus(value as "available" | "occupied" | "reserved")}
-                    >
-                      <SelectTrigger id="editTableStatus">
-                        <SelectValue placeholder="Status tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="available">Bo'sh</SelectItem>
-                        <SelectItem value="occupied">Band</SelectItem>
-                        <SelectItem value="reserved">Rezerv qilingan</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editTableWaiter">Ofitsiant</Label>
-                    <Select value={newTableWaiterId || "none"} onValueChange={setNewTableWaiterId}>
-                      <SelectTrigger id="editTableWaiter">
-                        <SelectValue placeholder="Ofitsiantni tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Belgilanmagan</SelectItem>
-                        {waiters.map((waiter) => (
-                          <SelectItem key={waiter.id} value={waiter.id}>
-                            {waiter.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsEditingTable(false)} disabled={isSubmitting}>
-                    Bekor qilish
-                  </Button>
-                  <Button onClick={handleEditTable} disabled={isSubmitting}>
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saqlanmoqda...
-                      </>
-                    ) : (
-                      "Saqlash"
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </TabsContent>
-
-          {/* Rooms Tab */}
-          <TabsContent value="rooms">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center space-x-2">
-                <Switch id="show-occupied-rooms" checked={showOccupiedRooms} onCheckedChange={setShowOccupiedRooms} />
-                <Label htmlFor="show-occupied-rooms">Band xonalarni ko'rsatish</Label>
-              </div>
-
-              <Dialog open={isAddingRoom} onOpenChange={setIsAddingRoom}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Xona qo'shish
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Yangi xona qo'shish</DialogTitle>
-                    <DialogDescription>Xona ma'lumotlarini kiriting</DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="roomNumber">Xona raqami</Label>
-                        <Input
-                          id="roomNumber"
-                          type="number"
-                          value={newRoomNumber}
-                          onChange={(e) => setNewRoomNumber(Number.parseInt(e.target.value) || 1)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="roomCapacity">Sig'imi (kishi)</Label>
-                        <Input
-                          id="roomCapacity"
-                          type="number"
-                          value={newRoomCapacity}
-                          onChange={(e) => setNewRoomCapacity(Number.parseInt(e.target.value) || 20)}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="roomStatus">Status</Label>
-                      <Select
-                        value={newRoomStatus}
-                        onValueChange={(value) => setNewRoomStatus(value as "available" | "occupied")}
-                      >
-                        <SelectTrigger id="roomStatus">
-                          <SelectValue placeholder="Status tanlang" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="available">Bo'sh</SelectItem>
-                          <SelectItem value="occupied">Band</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="roomWaiter">Ofitsiant</Label>
-                      <Select value={newRoomWaiterId || "none"} onValueChange={setNewRoomWaiterId}>
-                        <SelectTrigger id="roomWaiter">
-                          <SelectValue placeholder="Ofitsiantni tanlang" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Belgilanmagan</SelectItem>
-                          {waiters.map((waiter) => (
-                            <SelectItem key={waiter.id} value={waiter.id}>
-                              {waiter.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsAddingRoom(false)} disabled={isSubmitting}>
-                      Bekor qilish
-                    </Button>
-                    <Button onClick={handleAddRoom} disabled={isSubmitting}>
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Qo'shilmoqda...
-                        </>
+                        </TableHead>
+                        <TableHead>Turi</TableHead>
+                        <TableHead>Raqami</TableHead>
+                        <TableHead>Sig'imi</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Ofitsiant</TableHead>
+                        <TableHead className="text-right">Amallar</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredItems.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="h-24 text-center">
+                            Elementlar topilmadi
+                          </TableCell>
+                        </TableRow>
                       ) : (
-                        "Qo'shish"
+                        filteredItems.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedItems.includes(item.id)}
+                                onCheckedChange={() => handleSelectItem(item.id)}
+                                aria-label={`${item.type} #${item.number} tanlash`}
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                {getTypeIcon(item.type)}
+                                {item.type}
+                              </div>
+                            </TableCell>
+                            <TableCell>{item.number}</TableCell>
+                            <TableCell>{item.seats} kishi</TableCell>
+                            <TableCell>
+                              <Badge
+                                className={`${
+                                  item.status === "available"
+                                    ? "bg-green-100 text-green-800"
+                                    : item.status === "occupied"
+                                      ? "bg-red-100 text-red-800"
+                                      : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {item.status === "available"
+                                  ? "Bo'sh"
+                                  : item.status === "occupied"
+                                    ? "Band"
+                                    : "Rezerv qilingan"}
+                              </Badge>
+                              {hasActiveOrder(item.number, item.type) && (
+                                <Badge className="ml-2 bg-blue-100 text-blue-800">Faol buyurtma</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>{getWaiterName(item.waiterId)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    setSelectedItem(item)
+                                    setNewItemNumber(item.number)
+                                    setNewItemSeats(item.seats)
+                                    setNewItemType(item.type)
+                                    setNewItemStatus(item.status)
+                                    setNewItemWaiterId(item.waiterId || null)
+                                    setIsEditingItem(true)
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleToggleItemStatus(item)}>
+                                  <RefreshCw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteItem(item.id, item.type)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
                       )}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
+                    </TableBody>
+                  </Table>
+                </div>
+              </TabsContent>
 
-            {isLoading ? (
-              <div className="flex h-60 items-center justify-center">
-                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              {seatingTypes.map((type) => {
+                const typeItems = filteredItems.filter((item) => item.type === type.name)
+                return (
+                  <TabsContent key={type.id} value={type.name.toLowerCase()}>
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[50px]">
+                              <Checkbox
+                                checked={
+                                  typeItems.length > 0 && typeItems.every((item) => selectedItems.includes(item.id))
+                                }
+                                onCheckedChange={() => {
+                                  const allSelected = typeItems.every((item) => selectedItems.includes(item.id))
+                                  if (allSelected) {
+                                    setSelectedItems(
+                                      selectedItems.filter((id) => !typeItems.some((item) => item.id === id)),
+                                    )
+                                  } else {
+                                    setSelectedItems([...selectedItems, ...typeItems.map((item) => item.id)])
+                                  }
+                                }}
+                                aria-label={`Barcha ${type.name}larni tanlash`}
+                              />
+                            </TableHead>
+                            <TableHead>Raqami</TableHead>
+                            <TableHead>Sig'imi</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Ofitsiant</TableHead>
+                            <TableHead className="text-right">Amallar</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {typeItems.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6} className="h-24 text-center">
+                                {type.name} elementlari topilmadi
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            typeItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>
+                                  <Checkbox
+                                    checked={selectedItems.includes(item.id)}
+                                    onCheckedChange={() => handleSelectItem(item.id)}
+                                    aria-label={`${item.type} #${item.number} tanlash`}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">{item.number}</TableCell>
+                                <TableCell>{item.seats} kishi</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={`${
+                                      item.status === "available"
+                                        ? "bg-green-100 text-green-800"
+                                        : item.status === "occupied"
+                                          ? "bg-red-100 text-red-800"
+                                          : "bg-amber-100 text-amber-800"
+                                    }`}
+                                  >
+                                    {item.status === "available"
+                                      ? "Bo'sh"
+                                      : item.status === "occupied"
+                                        ? "Band"
+                                        : "Rezerv qilingan"}
+                                  </Badge>
+                                  {hasActiveOrder(item.number, item.type) && (
+                                    <Badge className="ml-2 bg-blue-100 text-blue-800">Faol buyurtma</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>{getWaiterName(item.waiterId)}</TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => {
+                                        setSelectedItem(item)
+                                        setNewItemNumber(item.number)
+                                        setNewItemSeats(item.seats)
+                                        setNewItemType(item.type)
+                                        setNewItemStatus(item.status)
+                                        setNewItemWaiterId(item.waiterId || null)
+                                        setIsEditingItem(true)
+                                      }}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => handleToggleItemStatus(item)}>
+                                      <RefreshCw className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleDeleteItem(item.id, item.type)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </TabsContent>
+                )
+              })}
+            </Tabs>
+          )}
+        </TabsContent>
+
+        {/* Seating Types Tab */}
+        <TabsContent value="types">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Joy turlari</h2>
+            <Button onClick={() => setIsAddingType(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Yangi tur qo'shish
+            </Button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {seatingTypes.length === 0 ? (
+              <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                <p className="text-muted-foreground">Joy turlari topilmadi</p>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredRooms.length === 0 ? (
-                  <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
-                    <p className="text-muted-foreground">Xonalar topilmadi</p>
-                  </div>
-                ) : (
-                  filteredRooms.map((room) => (
-                    <Card key={room.id} className={room.status === "occupied" ? "border-red-500" : ""}>
-                      <CardHeader className="bg-muted/50 p-4">
-                        <CardTitle className="flex items-center justify-between">
-                          <span>{room.number} xona</span>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setSelectedRoom(room)
-                                setNewRoomNumber(room.number)
-                                setNewRoomCapacity(room.capacity)
-                                setNewRoomStatus(room.status || "available")
-                                setNewRoomWaiterId(room.waiterId || null)
-                                setIsEditingRoom(true)
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRoom(room.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </CardTitle>
-                        <CardDescription>{room.capacity} kishilik</CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Status:</span>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              className={`${
-                                !room.status || room.status === "available"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {!room.status || room.status === "available" ? "Bo'sh" : "Band"}
-                            </Badge>
-                            <Switch
-                              checked={!room.status || room.status === "available"}
-                              onCheckedChange={() => handleToggleRoomStatus(room)}
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Ofitsiant:</span>
-                          <span className="text-sm">{getWaiterName(room.waiterId)}</span>
-                        </div>
-
-                        {hasActiveRoomOrder(room.number) && (
-                          <div className="mt-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => {
-                                const orders = getActiveOrdersForRoom(room.number)
-                                if (orders.length > 0) setViewingOrderDetails(orders)
-                              }}
-                            >
-                              <ClipboardList className="mr-2 h-4 w-4" />
-                              Buyurtmani ko'rish
-                            </Button>
-                          </div>
-                        )}
-                      </CardContent>
-                      <CardFooter className="p-4 pt-0">
-                        <Button variant="outline" className="w-full" onClick={() => setViewingRoomTables(room)}>
-                          <LayoutGrid className="mr-2 h-4 w-4" />
-                          Stollarni ko'rish
+              seatingTypes.map((type) => (
+                <Card key={type.id}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {getTypeIcon(type.name)}
+                        {type.name}
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setSelectedType(type)
+                            setNewTypeName(type.name)
+                            setNewTypeCapacity(type.defaultCapacity)
+                            setIsEditingType(true)
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
                         </Button>
-                      </CardFooter>
-                    </Card>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* Edit Room Dialog */}
-            <Dialog open={isEditingRoom} onOpenChange={setIsEditingRoom}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Xonani tahrirlash</DialogTitle>
-                  <DialogDescription>Xona ma'lumotlarini o'zgartiring</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="editRoomNumber">Xona raqami</Label>
-                      <Input
-                        id="editRoomNumber"
-                        type="number"
-                        value={newRoomNumber}
-                        onChange={(e) => setNewRoomNumber(Number.parseInt(e.target.value) || 1)}
-                      />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteType(type.id, type.name)}
+                          disabled={type.count > 0}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardTitle>
+                    <CardDescription>
+                      {type.count} ta element • {type.defaultCapacity} kishilik
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div className="rounded-md bg-green-50 p-2 text-center">
+                        <div className="font-medium text-green-700">{itemsByType[type.name]?.available || 0}</div>
+                        <div className="text-xs text-green-600">Bo'sh</div>
+                      </div>
+                      <div className="rounded-md bg-red-50 p-2 text-center">
+                        <div className="font-medium text-red-700">{itemsByType[type.name]?.occupied || 0}</div>
+                        <div className="text-xs text-red-600">Band</div>
+                      </div>
+                      <div className="rounded-md bg-amber-50 p-2 text-center">
+                        <div className="font-medium text-amber-700">{itemsByType[type.name]?.reserved || 0}</div>
+                        <div className="text-xs text-amber-600">Rezerv</div>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="editRoomCapacity">Sig'imi (kishi)</Label>
-                      <Input
-                        id="editRoomCapacity"
-                        type="number"
-                        value={newRoomCapacity}
-                        onChange={(e) => setNewRoomCapacity(Number.parseInt(e.target.value) || 20)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editRoomStatus">Status</Label>
-                    <Select
-                      value={newRoomStatus}
-                      onValueChange={(value) => setNewRoomStatus(value as "available" | "occupied")}
+                  </CardContent>
+                  <CardFooter>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        setNewItemType(type.name)
+                        setNewItemSeats(type.defaultCapacity)
+                        setIsAddingItem(true)
+                      }}
                     >
-                      <SelectTrigger id="editRoomStatus">
-                        <SelectValue placeholder="Status tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="available">Bo'sh</SelectItem>
-                        <SelectItem value="occupied">Band</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="editRoomWaiter">Ofitsiant</Label>
-                    <Select value={newRoomWaiterId || "none"} onValueChange={setNewRoomWaiterId}>
-                      <SelectTrigger id="editRoomWaiter">
-                        <SelectValue placeholder="Ofitsiantni tanlang" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Belgilanmagan</SelectItem>
-                        {waiters.map((waiter) => (
-                          <SelectItem key={waiter.id} value={waiter.id}>
-                            {waiter.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <Plus className="mr-2 h-4 w-4" />
+                      {type.name} qo'shish
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Add Type Dialog */}
+          <Dialog open={isAddingType} onOpenChange={setIsAddingType}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Yangi joy turi qo'shish</DialogTitle>
+                <DialogDescription>Joy turi ma'lumotlarini kiriting</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="typeName">Tur nomi</Label>
+                  <Input
+                    id="typeName"
+                    value={newTypeName}
+                    onChange={(e) => setNewTypeName(e.target.value)}
+                    placeholder="Masalan: Stol, Xona, Divan, Kreslo"
+                  />
                 </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsEditingRoom(false)} disabled={isSubmitting}>
-                    Bekor qilish
-                  </Button>
-                  <Button onClick={handleEditRoom} disabled={isSubmitting}>
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saqlanmoqda...
-                      </>
-                    ) : (
-                      "Saqlash"
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </TabsContent>
-        </Tabs>
-      )}
+                <div className="space-y-2">
+                  <Label htmlFor="typeCapacity">Standart sig'imi (kishi)</Label>
+                  <Input
+                    id="typeCapacity"
+                    type="number"
+                    value={newTypeCapacity}
+                    onChange={(e) => setNewTypeCapacity(Number.parseInt(e.target.value) || 1)}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsAddingType(false)} disabled={isSubmitting}>
+                  Bekor qilish
+                </Button>
+                <Button onClick={handleAddType} disabled={isSubmitting || !newTypeName.trim()}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Qo'shilmoqda...
+                    </>
+                  ) : (
+                    "Qo'shish"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Type Dialog */}
+          <Dialog open={isEditingType} onOpenChange={setIsEditingType}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Joy turini tahrirlash</DialogTitle>
+                <DialogDescription>Joy turi ma'lumotlarini o'zgartiring</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="editTypeName">Tur nomi</Label>
+                  <Input id="editTypeName" value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="editTypeCapacity">Standart sig'imi (kishi)</Label>
+                  <Input
+                    id="editTypeCapacity"
+                    type="number"
+                    value={newTypeCapacity}
+                    onChange={(e) => setNewTypeCapacity(Number.parseInt(e.target.value) || 1)}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditingType(false)} disabled={isSubmitting}>
+                  Bekor qilish
+                </Button>
+                <Button onClick={handleEditType} disabled={isSubmitting || !newTypeName.trim()}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saqlanmoqda...
+                    </>
+                  ) : (
+                    "Saqlash"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+      </Tabs>
+
+      {/* Add Item Dialog */}
+      <Dialog open={isAddingItem} onOpenChange={setIsAddingItem}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Yangi joy elementi qo'shish</DialogTitle>
+            <DialogDescription>Joy elementi ma'lumotlarini kiriting</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="itemType">Turi</Label>
+                <Select value={newItemType} onValueChange={setNewItemType}>
+                  <SelectTrigger id="itemType">
+                    <SelectValue placeholder="Turni tanlang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {seatingTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.name}>
+                        {type.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="itemNumber">Raqami</Label>
+                <Input
+                  id="itemNumber"
+                  type="number"
+                  value={newItemNumber}
+                  onChange={(e) => setNewItemNumber(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="itemSeats">Sig'imi (kishi)</Label>
+                <Input
+                  id="itemSeats"
+                  type="number"
+                  value={newItemSeats}
+                  onChange={(e) => setNewItemSeats(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="itemStatus">Status</Label>
+                <Select
+                  value={newItemStatus}
+                  onValueChange={(value) => setNewItemStatus(value as "available" | "occupied" | "reserved")}
+                >
+                  <SelectTrigger id="itemStatus">
+                    <SelectValue placeholder="Status tanlang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="available">Bo'sh</SelectItem>
+                    <SelectItem value="occupied">Band</SelectItem>
+                    <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="itemWaiter">Ofitsiant</Label>
+              <Select value={newItemWaiterId || "none"} onValueChange={setNewItemWaiterId}>
+                <SelectTrigger id="itemWaiter">
+                  <SelectValue placeholder="Ofitsiantni tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Belgilanmagan</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={waiter.id}>
+                      {waiter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddingItem(false)} disabled={isSubmitting}>
+              Bekor qilish
+            </Button>
+            <Button onClick={handleAddItem} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Qo'shilmoqda...
+                </>
+              ) : (
+                "Qo'shish"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Add Items Dialog */}
+      <Dialog open={isBatchAddingItems} onOpenChange={setIsBatchAddingItems}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ko'p joy elementlari qo'shish</DialogTitle>
+            <DialogDescription>Bir vaqtda bir nechta joy elementi qo'shish</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="batchItemType">Turi</Label>
+                <Select value={batchItemType} onValueChange={setBatchItemType}>
+                  <SelectTrigger id="batchItemType">
+                    <SelectValue placeholder="Turni tanlang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {seatingTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.name}>
+                        {type.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="batchStartNumber">Boshlang'ich raqam</Label>
+                <Input
+                  id="batchStartNumber"
+                  type="number"
+                  value={batchItemStartNumber}
+                  onChange={(e) => setBatchItemStartNumber(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="batchCount">Elementlar soni</Label>
+                <Input
+                  id="batchCount"
+                  type="number"
+                  value={batchItemCount}
+                  onChange={(e) => setBatchItemCount(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="batchSeats">Sig'imi (kishi)</Label>
+                <Input
+                  id="batchSeats"
+                  type="number"
+                  value={batchItemSeats}
+                  onChange={(e) => setBatchItemSeats(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batchWaiter">Ofitsiant</Label>
+              <Select value={batchItemWaiterId || "none"} onValueChange={setBatchItemWaiterId}>
+                <SelectTrigger id="batchWaiter">
+                  <SelectValue placeholder="Ofitsiantni tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Belgilanmagan</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={waiter.id}>
+                      {waiter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBatchAddingItems(false)} disabled={isSubmitting}>
+              Bekor qilish
+            </Button>
+            <Button onClick={handleBatchAddItems} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Qo'shilmoqda...
+                </>
+              ) : (
+                "Qo'shish"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Item Dialog */}
+      <Dialog open={isEditingItem} onOpenChange={setIsEditingItem}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Joy elementini tahrirlash</DialogTitle>
+            <DialogDescription>Joy elementi ma'lumotlarini o'zgartiring</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="editItemType">Turi</Label>
+                <Select value={newItemType} onValueChange={setNewItemType}>
+                  <SelectTrigger id="editItemType">
+                    <SelectValue placeholder="Turni tanlang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {seatingTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.name}>
+                        {type.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editItemNumber">Raqami</Label>
+                <Input
+                  id="editItemNumber"
+                  type="number"
+                  value={newItemNumber}
+                  onChange={(e) => setNewItemNumber(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="editItemSeats">Sig'imi (kishi)</Label>
+                <Input
+                  id="editItemSeats"
+                  type="number"
+                  value={newItemSeats}
+                  onChange={(e) => setNewItemSeats(Number.parseInt(e.target.value) || 1)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editItemStatus">Status</Label>
+                <Select
+                  value={newItemStatus}
+                  onValueChange={(value) => setNewItemStatus(value as "available" | "occupied" | "reserved")}
+                >
+                  <SelectTrigger id="editItemStatus">
+                    <SelectValue placeholder="Status tanlang" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="available">Bo'sh</SelectItem>
+                    <SelectItem value="occupied">Band</SelectItem>
+                    <SelectItem value="reserved">Rezerv qilingan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editItemWaiter">Ofitsiant</Label>
+              <Select value={newItemWaiterId || "none"} onValueChange={setNewItemWaiterId}>
+                <SelectTrigger id="editItemWaiter">
+                  <SelectValue placeholder="Ofitsiantni tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Belgilanmagan</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={waiter.id}>
+                      {waiter.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditingItem(false)} disabled={isSubmitting}>
+              Bekor qilish
+            </Button>
+            <Button onClick={handleEditItem} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saqlanmoqda...
+                </>
+              ) : (
+                "Saqlash"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore"
+import { collection, query, where, getDocs, orderBy, addDoc, deleteDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import AdminLayout from "@/components/admin/admin-layout"
+import AdminLayout  from "@/components/admin/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatCurrency } from "@/lib/utils"
@@ -17,11 +17,15 @@ import {
   PieChart,
   Download,
   Calendar,
-  TrendingUp,
   Users,
   Clock,
   ArrowUpRight,
   ArrowDownRight,
+  Archive,
+  AlertTriangle,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
 } from "lucide-react"
 import {
   BarChart as RechartsBarChart,
@@ -39,8 +43,20 @@ import {
   Area,
 } from "recharts"
 import * as XLSX from "xlsx"
-import { format, subDays } from "date-fns"
+import { format, subDays, startOfMonth, endOfMonth, differenceInDays, isBefore, addDays } from "date-fns"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Progress } from "@/components/ui/progress"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface TopItem {
   name: string
@@ -52,6 +68,8 @@ interface DailyRevenue {
   date: string
   revenue: number
   orders: number
+  paidRevenue?: number
+  unpaidRevenue?: number
 }
 
 interface OrdersByStatus {
@@ -64,6 +82,17 @@ interface OrdersByType {
   name: string
   value: number
   color: string
+}
+
+interface UnpaidOrder {
+  id: string
+  orderType: string
+  tableNumber?: number | null
+  roomNumber?: number | null
+  total: number
+  createdAt: any
+  status: string
+  daysSinceCreated: number
 }
 
 export function StatsPage() {
@@ -79,10 +108,26 @@ export function StatsPage() {
     ordersChange: 0,
     revenueChange: 0,
     averageOrderChange: 0,
+    paidOrdersChange: 0,
   })
+  const [unpaidOrders, setUnpaidOrders] = useState<UnpaidOrder[]>([])
+  const [totalPaidAmount, setTotalPaidAmount] = useState(0)
+  const [totalUnpaidAmount, setTotalUnpaidAmount] = useState(0)
+  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false)
+  const [isArchiving, setIsArchiving] = useState(false)
+  const [expiredOrdersCount, setExpiredOrdersCount] = useState(0)
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [orderDetails, setOrderDetails] = useState<any[]>([])
   const { toast } = useToast()
 
   const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d"]
+  const STATUS_COLORS = {
+    pending: "#FFBB28",
+    preparing: "#0088FE",
+    ready: "#00C49F",
+    completed: "#8884d8",
+    paid: "#82ca9d",
+  }
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -93,15 +138,16 @@ export function StatsPage() {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
 
-        const startDate = new Date(today)
+        let startDate = new Date(today)
+        let endDate = new Date()
+        endDate.setHours(23, 59, 59, 999)
+
         if (timeRange === "week") {
           startDate.setDate(today.getDate() - 7)
         } else if (timeRange === "month") {
-          startDate.setMonth(today.getMonth() - 1)
+          startDate = startOfMonth(today)
+          endDate = endOfMonth(today)
         }
-
-        const endDate = new Date()
-        endDate.setHours(23, 59, 59, 999)
 
         // For comparison with previous period
         const previousStartDate = new Date(startDate)
@@ -135,12 +181,15 @@ export function StatsPage() {
         // Current period stats
         let orderCount = 0
         let revenue = 0
+        let paidRevenue = 0
+        let paidOrdersCount = 0
         const itemCounts: Record<string, number> = {}
         const statusCounts: Record<string, number> = {
           pending: 0,
           preparing: 0,
           ready: 0,
           completed: 0,
+          paid: 0,
         }
         const typeCounts: Record<string, number> = {
           table: 0,
@@ -148,12 +197,48 @@ export function StatsPage() {
         }
 
         // Daily/weekly/monthly data for charts
-        const dailyData: Record<string, { revenue: number; orders: number }> = {}
+        const dailyData: Record<
+          string,
+          { revenue: number; orders: number; paidRevenue: number; unpaidRevenue: number }
+        > = {}
+
+        // Collect unpaid orders
+        const unpaidOrdersList: UnpaidOrder[] = []
+        const allOrderDetails: any[] = []
 
         ordersSnapshot.forEach((doc) => {
           const order = doc.data()
           orderCount++
           revenue += order.total
+
+          // Count paid orders
+          if (order.status === "paid" || order.isPaid) {
+            paidRevenue += order.total
+            paidOrdersCount++
+          } else {
+            // Add to unpaid orders list
+            const orderDate = order.createdAt.toDate()
+            const daysSinceCreated = differenceInDays(new Date(), orderDate)
+
+            unpaidOrdersList.push({
+              id: doc.id,
+              orderType: order.orderType,
+              tableNumber: order.tableNumber,
+              roomNumber: order.roomNumber,
+              total: order.total,
+              createdAt: order.createdAt,
+              status: order.status,
+              daysSinceCreated,
+            })
+          }
+
+          // Add to order details
+          allOrderDetails.push({
+            id: doc.id,
+            ...order,
+            createdAtDate: order.createdAt.toDate(),
+            isPaid: order.status === "paid" || order.isPaid,
+          })
 
           // Count items for popularity
           order.items.forEach((item: { name: string; quantity: number; price: number }) => {
@@ -179,27 +264,41 @@ export function StatsPage() {
           const dateKey = format(orderDate, timeRange === "today" ? "HH:00" : "yyyy-MM-dd")
 
           if (!dailyData[dateKey]) {
-            dailyData[dateKey] = { revenue: 0, orders: 0 }
+            dailyData[dateKey] = { revenue: 0, orders: 0, paidRevenue: 0, unpaidRevenue: 0 }
           }
 
           dailyData[dateKey].revenue += order.total
           dailyData[dateKey].orders += 1
+
+          if (order.status === "paid" || order.isPaid) {
+            dailyData[dateKey].paidRevenue += order.total
+          } else {
+            dailyData[dateKey].unpaidRevenue += order.total
+          }
         })
 
         // Previous period stats
         let previousOrderCount = 0
         let previousRevenue = 0
+        let previousPaidOrdersCount = 0
 
         previousOrdersSnapshot.forEach((doc) => {
           const order = doc.data()
           previousOrderCount++
           previousRevenue += order.total
+
+          if (order.status === "paid" || order.isPaid) {
+            previousPaidOrdersCount++
+          }
         })
 
         // Calculate changes
         const ordersChange = previousOrderCount > 0 ? ((orderCount - previousOrderCount) / previousOrderCount) * 100 : 0
-
         const revenueChange = previousRevenue > 0 ? ((revenue - previousRevenue) / previousRevenue) * 100 : 0
+        const paidOrdersChange =
+          previousPaidOrdersCount > 0
+            ? ((paidOrdersCount - previousPaidOrdersCount) / previousPaidOrdersCount) * 100
+            : 0
 
         const currentAvgOrder = orderCount > 0 ? revenue / orderCount : 0
         const previousAvgOrder = previousOrderCount > 0 ? previousRevenue / previousOrderCount : 0
@@ -210,6 +309,7 @@ export function StatsPage() {
           ordersChange,
           revenueChange,
           averageOrderChange,
+          paidOrdersChange,
         })
 
         // Convert to array and sort by count
@@ -220,10 +320,11 @@ export function StatsPage() {
 
         // Create orders by status data for pie chart
         const ordersByStatusArray = [
-          { name: "Kutilmoqda", value: statusCounts.pending, color: "#FFBB28" },
-          { name: "Tayyorlanmoqda", value: statusCounts.preparing, color: "#0088FE" },
-          { name: "Tayyor", value: statusCounts.ready, color: "#00C49F" },
-          { name: "Yakunlangan", value: statusCounts.completed, color: "#8884d8" },
+          { name: "Kutilmoqda", value: statusCounts.pending, color: STATUS_COLORS.pending },
+          { name: "Tayyorlanmoqda", value: statusCounts.preparing, color: STATUS_COLORS.preparing },
+          { name: "Tayyor", value: statusCounts.ready, color: STATUS_COLORS.ready },
+          { name: "Yakunlangan", value: statusCounts.completed, color: STATUS_COLORS.completed },
+          { name: "To'landi", value: statusCounts.paid, color: STATUS_COLORS.paid },
         ].filter((item) => item.value > 0)
 
         // Create orders by type data for pie chart
@@ -237,6 +338,17 @@ export function StatsPage() {
         setTopItems(topItemsArray)
         setOrdersByStatus(ordersByStatusArray)
         setOrdersByType(ordersByTypeArray)
+        setUnpaidOrders(unpaidOrdersList)
+        setTotalPaidAmount(paidRevenue)
+        setTotalUnpaidAmount(revenue - paidRevenue)
+        setOrderDetails(allOrderDetails)
+
+        // Count expired orders (older than 30 days and not paid)
+        const thirtyDaysAgo = subDays(new Date(), 30)
+        const expiredCount = unpaidOrdersList.filter((order) =>
+          isBefore(order.createdAt.toDate(), thirtyDaysAgo),
+        ).length
+        setExpiredOrdersCount(expiredCount)
 
         // Prepare time series data for charts
         const timeSeriesData: DailyRevenue[] = []
@@ -245,26 +357,30 @@ export function StatsPage() {
           // For today, show hourly data
           for (let hour = 0; hour < 24; hour++) {
             const hourKey = `${hour.toString().padStart(2, "0")}:00`
-            const hourData = dailyData[hourKey] || { revenue: 0, orders: 0 }
+            const hourData = dailyData[hourKey] || { revenue: 0, orders: 0, paidRevenue: 0, unpaidRevenue: 0 }
             timeSeriesData.push({
               date: hourKey,
               revenue: hourData.revenue,
               orders: hourData.orders,
+              paidRevenue: hourData.paidRevenue,
+              unpaidRevenue: hourData.unpaidRevenue,
             })
           }
         } else {
           // For week/month, show daily data
-          const daysToShow = timeRange === "week" ? 7 : 30
-          for (let i = daysToShow - 1; i >= 0; i--) {
-            const date = subDays(new Date(), i)
+          const daysToShow = timeRange === "week" ? 7 : differenceInDays(endDate, startDate) + 1
+          for (let i = 0; i < daysToShow; i++) {
+            const date = addDays(startDate, i)
             const dateKey = format(date, "yyyy-MM-dd")
             const dateStr = format(date, "dd MMM")
-            const dayData = dailyData[dateKey] || { revenue: 0, orders: 0 }
+            const dayData = dailyData[dateKey] || { revenue: 0, orders: 0, paidRevenue: 0, unpaidRevenue: 0 }
 
             timeSeriesData.push({
               date: dateStr,
               revenue: dayData.revenue,
               orders: dayData.orders,
+              paidRevenue: dayData.paidRevenue,
+              unpaidRevenue: dayData.unpaidRevenue,
             })
           }
         }
@@ -289,6 +405,21 @@ export function StatsPage() {
     return formatCurrency(value)
   }
 
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
+
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }}
+
   const exportToExcel = () => {
     try {
       // Create workbook and worksheet
@@ -299,6 +430,8 @@ export function StatsPage() {
         ["Statistika", timeRange === "today" ? "Bugun" : timeRange === "week" ? "Hafta" : "Oy"],
         ["Buyurtmalar soni", todayOrders],
         ["Jami tushum", todayRevenue],
+        ["To'langan summa", totalPaidAmount],
+        ["To'lanmagan summa", totalUnpaidAmount],
         ["O'rtacha buyurtma qiymati", todayOrders > 0 ? todayRevenue / todayOrders : 0],
         [],
         ["Buyurtmalar holati"],
@@ -318,9 +451,30 @@ export function StatsPage() {
       if (revenueData.length > 0) {
         mainStats.push([])
         mainStats.push([timeRange === "week" ? "Haftalik tushum" : "Oylik tushum"])
-        mainStats.push(["Sana", "Tushum", "Buyurtmalar"])
+        mainStats.push(["Sana", "Tushum", "To'langan", "To'lanmagan", "Buyurtmalar"])
         revenueData.forEach((item) => {
-          mainStats.push([item.date, item.revenue, item.orders])
+          mainStats.push([item.date, item.revenue, item.paidRevenue, item.unpaidRevenue, item.orders])
+        })
+      }
+
+      // Add unpaid orders data
+      if (unpaidOrders.length > 0) {
+        mainStats.push([])
+        mainStats.push(["To'lanmagan buyurtmalar"])
+        mainStats.push(["ID", "Tur", "Stol/Xona", "Summa", "Yaratilgan sana", "Kun o'tgan"])
+        unpaidOrders.forEach((order) => {
+          mainStats.push([
+            order.id,
+            order.orderType === "table" ? "Stol" : "Yetkazib berish",
+            order.orderType === "table"
+              ? order.roomNumber
+                ? `Xona #${order.roomNumber}`
+                : `Stol #${order.tableNumber}`
+              : "-",
+            order.total,
+            format(order.createdAt.toDate(), "yyyy-MM-dd"),
+            order.daysSinceCreated,
+          ])
         })
       }
 
@@ -374,6 +528,67 @@ export function StatsPage() {
     return <span className="text-muted-foreground">0%</span>
   }
 
+  const handleArchiveExpiredOrders = async () => {
+    setIsArchiving(true)
+    try {
+      const thirtyDaysAgo = subDays(new Date(), 30)
+
+      // Get expired orders
+      const expiredOrdersQuery = query(
+        collection(db, "orders"),
+        where("createdAt", "<", thirtyDaysAgo),
+        where("status", "!=", "paid"),
+      )
+
+      const expiredOrdersSnapshot = await getDocs(expiredOrdersQuery)
+      let archivedCount = 0
+
+      // Archive each expired order
+      for (const doc of expiredOrdersSnapshot.docs) {
+        const order = doc.data()
+
+        // Add to orderHistory collection
+        await addDoc(collection(db, "orderHistory"), {
+          ...order,
+          id: doc.id,
+          deletedAt: Timestamp.now(),
+          deletedBy: "system",
+          archiveReason: "expired",
+        })
+
+        // Delete from orders collection
+        await deleteDoc(doc.ref)
+        archivedCount++
+      }
+
+      toast({
+        title: "Arxivlash yakunlandi",
+        description: `${archivedCount} ta muddati o'tgan buyurtma arxivlandi`,
+      })
+
+      // Refresh stats
+      setTimeRange((prev) => prev)
+      setIsArchiveDialogOpen(false)
+    } catch (error) {
+      console.error("Error archiving expired orders:", error)
+      toast({
+        title: "Xatolik",
+        description: "Buyurtmalarni arxivlashda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsArchiving(false)
+    }
+  }
+
+  // Filter order details based on status
+  const filteredOrderDetails = orderDetails.filter((order) => {
+    if (statusFilter === "all") return true
+    if (statusFilter === "paid") return order.isPaid
+    if (statusFilter === "unpaid") return !order.isPaid
+    return order.status === statusFilter
+  })
+
   return (
     <AdminLayout>
       <div className="container mx-auto p-4">
@@ -402,6 +617,17 @@ export function StatsPage() {
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">Excel</span>
             </Button>
+
+            {expiredOrdersCount > 0 && (
+              <Button
+                variant="outline"
+                className="flex items-center gap-2 text-amber-600 border-amber-600"
+                onClick={() => setIsArchiveDialogOpen(true)}
+              >
+                <Archive className="h-4 w-4" />
+                <span>Arxivlash ({expiredOrdersCount})</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -486,53 +712,43 @@ export function StatsPage() {
 
               <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">O'rtacha buyurtma qiymati</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">To'langan summa</CardTitle>
+                  <CheckCircle className="h-4 w-4 text-green-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {todayOrders > 0 ? formatCurrency(todayRevenue / todayOrders) : formatCurrency(0)}
-                  </div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">
-                      O'tgan {timeRange === "today" ? "kun" : timeRange === "week" ? "hafta" : "oy"}ga nisbatan
-                    </span>
-                    {renderChangeIndicator(comparisonData.averageOrderChange)}
+                  <div className="text-2xl font-bold text-green-600">{formatCurrency(totalPaidAmount)}</div>
+                  <div className="mt-1">
+                    <Progress
+                      value={todayRevenue > 0 ? (totalPaidAmount / todayRevenue) * 100 : 0}
+                      className="h-2 bg-gray-100"
+                    />
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {todayRevenue > 0
+                        ? `${((totalPaidAmount / todayRevenue) * 100).toFixed(1)}% to'langan`
+                        : "Ma'lumot yo'q"}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card className="shadow-sm hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Buyurtma turlari</CardTitle>
-                  <PieChart className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">To'lanmagan summa</CardTitle>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[100px]">
-                    {ordersByType.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RechartsPieChart>
-                          <Pie
-                            data={ordersByType}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={25}
-                            outerRadius={40}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {ordersByType.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <RechartsTooltip formatter={(value) => [value, "Buyurtmalar soni"]} />
-                        </RechartsPieChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex h-full items-center justify-center">
-                        <p className="text-sm text-muted-foreground">Ma'lumot yo'q</p>
-                      </div>
-                    )}
+                  <div className="text-2xl font-bold text-red-600">{formatCurrency(totalUnpaidAmount)}</div>
+                  <div className="mt-1">
+                    <Progress
+                      value={todayRevenue > 0 ? (totalUnpaidAmount / todayRevenue) * 100 : 0}
+                      className="h-2 bg-gray-100"
+                      indicatorClassName="bg-red-500"
+                    />
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {todayRevenue > 0
+                        ? `${((totalUnpaidAmount / todayRevenue) * 100).toFixed(1)}% to'lanmagan`
+                        : "Ma'lumot yo'q"}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -549,7 +765,10 @@ export function StatsPage() {
                         ? "Haftalik tushum"
                         : "Oylik tushum"}
                   </CardTitle>
-                  <CardDescription>Jami tushum: {formatCurrency(todayRevenue)}</CardDescription>
+                  <CardDescription>
+                    Jami tushum: {formatCurrency(todayRevenue)} | To'langan: {formatCurrency(totalPaidAmount)} |
+                    To'lanmagan: {formatCurrency(totalUnpaidAmount)}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[300px]">
@@ -562,16 +781,32 @@ export function StatsPage() {
                           <RechartsTooltip
                             formatter={(value, name) => [
                               formatCurrency(value as number),
-                              name === "revenue" ? "Tushum" : "Buyurtmalar",
+                              name === "paidRevenue"
+                                ? "To'langan"
+                                : name === "unpaidRevenue"
+                                  ? "To'lanmagan"
+                                  : name === "revenue"
+                                    ? "Jami tushum"
+                                    : "Buyurtmalar",
                             ]}
                           />
                           <Area
                             type="monotone"
-                            dataKey="revenue"
-                            name="Tushum"
-                            stroke="#8884d8"
-                            fill="#8884d8"
-                            fillOpacity={0.3}
+                            dataKey="paidRevenue"
+                            name="To'langan"
+                            stackId="1"
+                            stroke="#82ca9d"
+                            fill="#82ca9d"
+                            fillOpacity={0.6}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="unpaidRevenue"
+                            name="To'lanmagan"
+                            stackId="1"
+                            stroke="#ff8042"
+                            fill="#ff8042"
+                            fillOpacity={0.6}
                           />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -688,9 +923,141 @@ export function StatsPage() {
                 </Card>
               )}
             </div>
+
+          
+
+            {/* Buyurtmalar jadvali */}
+            <div className="mt-8">
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ShoppingBag className="h-5 w-5" />
+                    Buyurtmalar ro'yxati
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Holat bo'yicha" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Barcha buyurtmalar</SelectItem>
+                        <SelectItem value="pending">Kutilmoqda</SelectItem>
+                        <SelectItem value="preparing">Tayyorlanmoqda</SelectItem>
+                        <SelectItem value="ready">Tayyor</SelectItem>
+                        <SelectItem value="completed">Yakunlangan</SelectItem>
+                        <SelectItem value="paid">To'langan</SelectItem>
+                        <SelectItem value="unpaid">To'lanmagan</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Buyurtma</TableHead>
+                          <TableHead>Sana</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Summa</TableHead>
+                          <TableHead>To'lov</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredOrderDetails.slice(0, 10).map((order) => (
+                          <TableRow key={order.id}>
+                            <TableCell>
+                            {order.orderType === "table"
+                          ? order.roomNumber
+                            ? `Xona #${order.roomNumber}`
+                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
+                          : "Yetkazib berish"}
+                            </TableCell>
+                            <TableCell>{format(order.createdAtDate, "dd.MM.yyyy HH:mm")}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`${
+                                  order.status === "pending"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : order.status === "preparing"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : order.status === "ready"
+                                        ? "bg-green-100 text-green-800"
+                                        : order.status === "completed"
+                                          ? "bg-gray-100 text-gray-800"
+                                          : "bg-green-100 text-green-800"
+                                }`}
+                              >
+                                {order.status === "pending"
+                                  ? "Kutilmoqda"
+                                  : order.status === "preparing"
+                                    ? "Tayyorlanmoqda"
+                                    : order.status === "ready"
+                                      ? "Tayyor"
+                                      : order.status === "completed"
+                                        ? "Yakunlangan"
+                                        : "To'landi"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatCurrency(order.total)}</TableCell>
+                            <TableCell>
+                              {order.isPaid ? (
+                                <Badge variant="outline" className="bg-green-100 text-green-800">
+                                  To'langan
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-red-100 text-red-800">
+                                  To'lanmagan
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {filteredOrderDetails.length > 10 && (
+                    <div className="mt-4 text-center">
+                      <Button variant="outline" size="sm">
+                        Barcha {filteredOrderDetails.length} ta buyurtmani ko'rish
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </>
         )}
       </div>
+
+      {/* Archive Dialog */}
+      <Dialog open={isArchiveDialogOpen} onOpenChange={setIsArchiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Muddati o'tgan buyurtmalarni arxivlash</DialogTitle>
+            <DialogDescription>
+              30 kundan ortiq vaqt o'tgan va to'lanmagan {expiredOrdersCount} ta buyurtma mavjud. Ularni arxivlashni
+              istaysizmi?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsArchiveDialogOpen(false)} disabled={isArchiving}>
+              Bekor qilish
+            </Button>
+            <Button onClick={handleArchiveExpiredOrders} disabled={isArchiving}>
+              {isArchiving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Arxivlanmoqda...
+                </>
+              ) : (
+                "Arxivlash"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   )
 }

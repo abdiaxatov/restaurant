@@ -1,11 +1,13 @@
 "use client"
 import { formatCurrency, getStatusColor, getStatusText } from "@/lib/utils"
-import { Trash2, CreditCard } from "lucide-react"
+import { Trash2, CreditCard, Clock } from "lucide-react"
 import type { Order } from "@/types"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
 import { collection, query, where, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { Badge } from "@/components/ui/badge"
+import { differenceInDays } from "date-fns"
 
 interface OrderListProps {
   orders: Order[]
@@ -118,64 +120,82 @@ export function OrderList({ orders, selectedOrderId, onSelectOrder, onDeleteOrde
         <div>Amallar</div>
       </div>
       <div className="divide-y">
-        {orders.map((order) => (
-          <div
-            key={order.id}
-            className={`grid grid-cols-[1.5fr_1fr_1fr_auto] gap-4 p-4 hover:bg-muted/50 ${
-              selectedOrderId === order.id ? "bg-muted" : ""
-            }`}
-          >
-            <div>
-              <div className="font-medium">
-                {order.orderType === "table"
-                  ? order.roomNumber
-                    ? `Xona #${order.roomNumber}`
-                    : `Stol #${order.tableNumber}`
-                  : "Yetkazib berish"}
-                {order.orderType === "table" && (
-                  <span className="ml-1 text-sm text-muted-foreground">- {getWaiterName(order)}</span>
+        {orders.map((order) => {
+          const orderDate = order.createdAt?.toDate ? new Date(order.createdAt.toDate()) : new Date()
+          const daysSinceCreated = differenceInDays(new Date(), orderDate)
+          const isOld = daysSinceCreated > 7 && order.status !== "paid" && !order.isPaid
+
+          return (
+            <div
+              key={order.id}
+              className={`grid grid-cols-[1.5fr_1fr_1fr_auto] gap-4 p-4 hover:bg-muted/50 ${
+                selectedOrderId === order.id ? "bg-muted" : ""
+              } ${isOld ? "bg-red-50" : ""}`}
+            >
+              <div>
+                <div className="font-medium">
+                  {order.orderType === "table"
+                    ? order.roomNumber
+                      ? `Xona #${order.roomNumber}`
+                      : `Stol #${order.tableNumber}`
+                    : "Yetkazib berish"}
+                  {order.orderType === "table" && (
+                    <span className="ml-1 text-sm text-muted-foreground">- {getWaiterName(order)}</span>
+                  )}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {order.createdAt?.toDate
+                    ? new Date(order.createdAt.toDate()).toLocaleString("uz-UZ", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })
+                    : ""}
+                  {isOld && (
+                    <Badge variant="outline" className="ml-2 bg-red-100 text-red-800">
+                      <Clock className="mr-1 h-3 w-3" />
+                      {daysSinceCreated} kun
+                    </Badge>
+                  )}
+                </div>
+                {(order.isPaid || order.status === "paid") && (
+                  <div className="mt-1 flex items-center text-xs text-green-600">
+                    <CreditCard className="mr-1 h-3 w-3" />
+                    To'langan: {order.paidAt?.toDate ? formatDate(order.paidAt) : ""}
+                  </div>
                 )}
               </div>
-              <div className="text-sm text-muted-foreground">
-                {order.createdAt?.toDate
-                  ? new Date(order.createdAt.toDate()).toLocaleString("uz-UZ", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })
-                  : ""}
-              </div>
-              {order.isPaid && (
-                <div className="mt-1 flex items-center text-xs text-green-600">
-                  <CreditCard className="mr-1 h-3 w-3" />
-                  To'langan: {order.paidAt?.toDate ? formatDate(order.paidAt) : ""}
-                </div>
-              )}
-            </div>
-            <div>
-              <div
-                className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusColor(order.status)}`}
-              >
-                {getStatusText(order.status)}
-              </div>
-            </div>
-            <div className="font-medium">{formatCurrency(order.total)}</div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => onSelectOrder(order)}>
-                Batafsil
-              </Button>
-              {onDeleteOrder && (
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8 text-destructive"
-                  onClick={() => onDeleteOrder(order)}
+              <div>
+                <div
+                  className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                    order.status === "paid" || order.isPaid
+                      ? "bg-green-100 text-green-800"
+                      : getStatusColor(order.status)
+                  }`}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {order.status === "paid" || order.isPaid ? "To'landi" : getStatusText(order.status)}
+                </div>
+              </div>
+              <div className={`font-medium ${order.status === "paid" || order.isPaid ? "text-green-600" : ""}`}>
+                {formatCurrency(order.total)}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => onSelectOrder(order)}>
+                  Batafsil
                 </Button>
-              )}
+                {onDeleteOrder && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 text-destructive"
+                    onClick={() => onDeleteOrder(order)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ import { getDocs as getDocsHelper } from "@/lib/getDocs"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { playAudio, initAudioContext } from "@/lib/audio-player"
 
 export function ChefPage() {
   const [pendingOrders, setPendingOrders] = useState<Order[]>([])
@@ -27,15 +28,45 @@ export function ChefPage() {
   const [waiterNames, setWaiterNames] = useState<Record<string, string>>({})
   const [tableWaiters, setTableWaiters] = useState<Record<number, string>>({})
   const [roomWaiters, setRoomWaiters] = useState<Record<number, string>>({})
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const notificationAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [seatingTypes, setSeatingTypes] = useState<Record<string, string>>({})
   const previousPendingCountRef = useRef(0)
+
+  // Initialize audio context on first user interaction
+  useEffect(() => {
+    const handleUserInteraction = () => {
+      initAudioContext()
+      document.removeEventListener("click", handleUserInteraction)
+    }
+    document.addEventListener("click", handleUserInteraction)
+
+    return () => {
+      document.removeEventListener("click", handleUserInteraction)
+    }
+  }, [])
 
   useEffect(() => {
     // Load saved waiter filter from localStorage
     const savedWaiterFilter = localStorage.getItem("chefWaiterFilter")
     if (savedWaiterFilter) {
       setWaiterFilter(savedWaiterFilter)
+    }
+
+    // Fetch seating types
+    const fetchSeatingTypes = async () => {
+      try {
+        const typesData = await getDocsHelper("seatingTypes", [])
+        const typesMap: Record<string, string> = {}
+
+        typesData.forEach((type: any) => {
+          if (type.name) {
+            typesMap[type.id] = type.name
+          }
+        })
+
+        setSeatingTypes(typesMap)
+      } catch (error) {
+        console.error("Error fetching seating types:", error)
+      }
     }
 
     // Fetch waiters
@@ -98,6 +129,7 @@ export function ChefPage() {
       }
     }
 
+    fetchSeatingTypes()
     fetchWaiters()
     fetchTableWaiters()
     fetchRoomWaiters()
@@ -125,12 +157,12 @@ export function ChefPage() {
   // Function to fetch orders
   const fetchOrders = async () => {
     try {
-      // Get pending orders
-      const pendingOrdersData = await getDocsHelper("orders", [["status", "==", "pending"]])
+      // Get pending orders using our improved helper function
+      const pendingOrdersData = await getDocsHelper("orders", [{ field: "status", operator: "==", value: "pending" }])
 
       // Check for new orders and play notification if needed
       if (pendingOrdersData.length > previousPendingCountRef.current && soundEnabled) {
-        notificationAudioRef.current?.play().catch((e) => console.error("Error playing notification:", e))
+        playAudio("/notification.mp3").catch((e) => console.error("Error playing notification:", e))
       }
       previousPendingCountRef.current = pendingOrdersData.length
 
@@ -155,7 +187,9 @@ export function ChefPage() {
       setPendingOrders(filteredPendingOrders)
 
       // Get preparing orders
-      const preparingOrdersData = await getDocsHelper("orders", [["status", "==", "preparing"]])
+      const preparingOrdersData = await getDocsHelper("orders", [
+        { field: "status", operator: "==", value: "preparing" },
+      ])
 
       // Filter preparing orders by waiter if needed
       let filteredPreparingOrders = preparingOrdersData
@@ -177,8 +211,10 @@ export function ChefPage() {
 
       setPreparingOrders(filteredPreparingOrders)
 
-      // Get completed orders (limit to last 20 for performance)
-      const completedOrdersData = await getDocsHelper("orders", [["status", "==", "completed"]])
+      // Get completed orders
+      const completedOrdersData = await getDocsHelper("orders", [
+        { field: "status", operator: "==", value: "completed" },
+      ])
 
       // Filter completed orders by waiter if needed
       let filteredCompletedOrders = completedOrdersData
@@ -208,10 +244,6 @@ export function ChefPage() {
   }
 
   useEffect(() => {
-    // Initialize audio elements
-    audioRef.current = new Audio("/cooking.mp3")
-    notificationAudioRef.current = new Audio("/notification.mp3")
-
     // Initial fetch
     fetchOrders()
 
@@ -223,7 +255,7 @@ export function ChefPage() {
     return () => {
       clearInterval(intervalId)
     }
-  }, [waiterFilter])
+  }, [waiterFilter, soundEnabled])
 
   const handleStartPreparing = async (orderId: string) => {
     try {
@@ -234,7 +266,7 @@ export function ChefPage() {
 
       // Play cooking sound if enabled
       if (soundEnabled) {
-        audioRef.current?.play().catch((e) => console.error("Error playing sound:", e))
+        playAudio("/cooking.mp3").catch((e) => console.error("Error playing sound:", e))
       }
 
       // Refresh orders after update
@@ -253,8 +285,7 @@ export function ChefPage() {
 
       // Play ready sound if enabled
       if (soundEnabled) {
-        const audio = new Audio("/ready.mp3")
-        audio.play().catch((e) => console.error("Error playing sound:", e))
+        playAudio("/ready.mp3").catch((e) => console.error("Error playing sound:", e))
       }
 
       // Refresh orders after update
@@ -276,6 +307,25 @@ export function ChefPage() {
     })
   }
 
+  // Function to get the correct seating type display
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
+
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }
+
+    return order.tableType || "Stol"
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -287,7 +337,7 @@ export function ChefPage() {
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">Oshxona</h1>
+        <h1 className="text-2xl font-bold">Oshpazlar</h1>
         <div className="flex items-center gap-4">
           <Select value={waiterFilter} onValueChange={(value) => setWaiterFilter(value)}>
             <SelectTrigger className="w-[180px]">
@@ -317,14 +367,10 @@ export function ChefPage() {
       </div>
 
       <Tabs defaultValue="pending">
-        <TabsList className="mb-4 grid w-full grid-cols-3">
+        <TabsList className="mb-4 grid w-full grid-cols-2">
           <TabsTrigger value="pending" className="relative">
             Yangi
             {pendingOrders.length > 0 && <Badge className="ml-2 bg-primary">{pendingOrders.length}</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="preparing" className="relative">
-            Tayyorlanmoqda
-            {preparingOrders.length > 0 && <Badge className="ml-2 bg-blue-500">{preparingOrders.length}</Badge>}
           </TabsTrigger>
           <TabsTrigger value="history" className="relative">
             <History className="mr-1 h-4 w-4" />
@@ -347,7 +393,7 @@ export function ChefPage() {
                         {order.orderType === "table"
                           ? order.roomNumber
                             ? `Xona #${order.roomNumber}`
-                            : `Stol #${order.tableNumber}`
+                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
                         {order.orderType === "table" && (
                           <span className="ml-1 text-sm font-normal text-muted-foreground">
@@ -404,7 +450,7 @@ export function ChefPage() {
                         {order.orderType === "table"
                           ? order.roomNumber
                             ? `Xona #${order.roomNumber}`
-                            : `Stol #${order.tableNumber}`
+                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
                         {order.orderType === "table" && (
                           <span className="ml-1 text-sm font-normal text-muted-foreground">
@@ -461,7 +507,7 @@ export function ChefPage() {
                         {order.orderType === "table"
                           ? order.roomNumber
                             ? `Xona #${order.roomNumber}`
-                            : `Stol #${order.tableNumber}`
+                            : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
                           : "Yetkazib berish"}
                         {order.orderType === "table" && (
                           <span className="ml-1 text-sm font-normal text-muted-foreground">

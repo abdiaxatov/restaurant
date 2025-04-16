@@ -1,7 +1,5 @@
 "use client"
 
-import { Badge } from "@/components/ui/badge"
-
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useCart } from "@/components/cart-provider"
@@ -28,9 +26,9 @@ import {
   onSnapshot,
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { ArrowLeft, Loader2, ShoppingCart, Trash2, AlertTriangle, Clock, Receipt } from "lucide-react"
+import { ArrowLeft, Loader2, ShoppingCart, Trash2, AlertTriangle } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import type { MenuItem, Order } from "@/types"
+import type { MenuItem } from "@/types"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
@@ -39,18 +37,17 @@ export function CartPage() {
   const [orderType, setOrderType] = useState<"table" | "delivery">("table")
   const [tableNumber, setTableNumber] = useState<number | null>(null)
   const [roomNumber, setRoomNumber] = useState<number | null>(null)
+  const [seatingType, setSeatingType] = useState<string | null>(null)
   const [phoneNumber, setPhoneNumber] = useState("")
   const [address, setAddress] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [hasAvailableTables, setHasAvailableTables] = useState(true)
-  const [hasAvailableRooms, setHasAvailableRooms] = useState(true)
+  const [hasAvailableSeatingItems, setHasAvailableSeatingItems] = useState(true)
   const [isDeliveryAvailable, setIsDeliveryAvailable] = useState(true)
   const [isLoading, setIsLoading] = useState(true)
   const [deliveryFee, setDeliveryFee] = useState(15000)
   const [containerCost, setContainerCost] = useState(0)
   const [menuItems, setMenuItems] = useState<Record<string, MenuItem>>({})
-  const [previousOrders, setPreviousOrders] = useState<Order[]>([])
-  const [totalFromPreviousOrders, setTotalFromPreviousOrders] = useState(0)
+  const [seatingTypes, setSeatingTypes] = useState<string[]>([])
   const router = useRouter()
   const { toast } = useToast()
   // Add state for tracking validation errors
@@ -76,19 +73,17 @@ export function CartPage() {
         if (diffInMinutes <= 20) {
           if (lastOrderInfo.tableNumber) {
             setTableNumber(lastOrderInfo.tableNumber)
-            // Fetch previous orders for this table
-            fetchPreviousOrders(lastOrderInfo.tableNumber, null)
+            setSeatingType(lastOrderInfo.seatingType || "Stol")
             toast({
-              title: "Stol avtomatik tanlandi",
-              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.tableNumber}-stol avtomatik tanlandi.`,
+              title: "Joy avtomatik tanlandi",
+              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.tableNumber}-${lastOrderInfo.seatingType || "Stol"} avtomatik tanlandi.`,
             })
           } else if (lastOrderInfo.roomNumber) {
             setRoomNumber(lastOrderInfo.roomNumber)
-            // Fetch previous orders for this room
-            fetchPreviousOrders(null, lastOrderInfo.roomNumber)
+            setSeatingType("Xona")
             toast({
               title: "Xona avtomatik tanlandi",
-              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.roomNumber}-xona avtomatik tanlandi.`,
+              description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.roomNumber}-Xona avtomatik tanlandi.`,
             })
           }
         }
@@ -98,92 +93,51 @@ export function CartPage() {
     }
   }, [toast])
 
-  // Fetch previous orders for the selected table/room
-  const fetchPreviousOrders = async (tableNum: number | null, roomNum: number | null) => {
-    if (!tableNum && !roomNum) return
-
-    try {
-      let ordersQuery
-      if (tableNum) {
-        ordersQuery = query(
-          collection(db, "orders"),
-          where("orderType", "==", "table"),
-          where("tableNumber", "==", tableNum),
-          where("status", "!=", "completed"),
-        )
-      } else {
-        ordersQuery = query(
-          collection(db, "orders"),
-          where("orderType", "==", "table"),
-          where("roomNumber", "==", roomNum),
-          where("status", "!=", "completed"),
-        )
-      }
-
-      const ordersSnapshot = await getDocs(ordersQuery)
-      const ordersData: Order[] = []
-      let total = 0
-
-      ordersSnapshot.forEach((doc) => {
-        const orderData = { id: doc.id, ...doc.data() } as Order
-        ordersData.push(orderData)
-        total += orderData.total
-      })
-
-      setPreviousOrders(ordersData)
-      setTotalFromPreviousOrders(total)
-    } catch (error) {
-      console.error("Error fetching previous orders:", error)
-    }
-  }
-
-  // Check if there are available tables, rooms and if delivery is available
+  // Check if there are available seating items and if delivery is available
   useEffect(() => {
     setIsLoading(true)
 
     // Initialize empty unsubscribe functions
-    let tablesUnsubscribe = () => {}
-    let roomsUnsubscribe = () => {}
+    let seatingItemsUnsubscribe = () => {}
     let settingsUnsubscribe = () => {}
     let menuItemsUnsubscribe = () => {}
+    let seatingTypesUnsubscribe = () => {}
 
     try {
-      // Check for available tables
-      tablesUnsubscribe = onSnapshot(
-        query(collection(db, "tables"), where("status", "==", "available")),
+      // Fetch seating types
+      seatingTypesUnsubscribe = onSnapshot(
+        collection(db, "seatingTypes"),
         (snapshot) => {
-          setHasAvailableTables(!snapshot.empty)
-
-          // If no tables are available, check if rooms are available
-          if (snapshot.empty) {
-            roomsUnsubscribe = onSnapshot(
-              query(collection(db, "rooms"), where("status", "!=", "occupied")),
-              (roomsSnapshot) => {
-                setHasAvailableRooms(!roomsSnapshot.empty)
-
-                // If no tables and no rooms are available, default to delivery if it's available
-                if (roomsSnapshot.empty && isDeliveryAvailable) {
-                  setOrderType("delivery")
-                }
-
-                setIsLoading(false)
-              },
-              (error) => {
-                console.error("Error checking available rooms:", error)
-                setHasAvailableRooms(false)
-                if (isDeliveryAvailable) {
-                  setOrderType("delivery")
-                }
-                setIsLoading(false)
-              },
-            )
-          } else {
-            setIsLoading(false)
-          }
+          const types: string[] = []
+          snapshot.forEach((doc) => {
+            const typeData = doc.data()
+            if (typeData.name) {
+              types.push(typeData.name)
+            }
+          })
+          setSeatingTypes(types)
         },
         (error) => {
-          console.error("Error checking available tables:", error)
-          setHasAvailableTables(false)
+          console.error("Error fetching seating types:", error)
+        },
+      )
+
+      // Check for available seating items
+      seatingItemsUnsubscribe = onSnapshot(
+        query(collection(db, "seatingItems"), where("status", "==", "available")),
+        (snapshot) => {
+          setHasAvailableSeatingItems(!snapshot.empty)
+
+          // If no available seating items, default to delivery if it's available
+          if (snapshot.empty && isDeliveryAvailable) {
+            setOrderType("delivery")
+          }
+
+          setIsLoading(false)
+        },
+        (error) => {
+          console.error("Error checking available seating items:", error)
+          setHasAvailableSeatingItems(false)
           if (isDeliveryAvailable) {
             setOrderType("delivery")
           }
@@ -200,21 +154,17 @@ export function CartPage() {
             setIsDeliveryAvailable(data.deliveryAvailable !== false)
             setDeliveryFee(data.deliveryFee || 15000)
 
-            // If delivery is not available and there are no tables/rooms, show warning
-            if (data.deliveryAvailable === false && !hasAvailableTables && !hasAvailableRooms) {
+            // If delivery is not available and there are no available seating items, show warning
+            if (data.deliveryAvailable === false && !hasAvailableSeatingItems) {
               toast({
                 title: "Buyurtma berish imkoni yo'q",
-                description: "Hozirda na stollar, na yetkazib berish xizmati mavjud emas.",
+                description: "Hozirda na joylar, na yetkazib berish xizmati mavjud emas.",
                 variant: "destructive",
               })
             }
 
             // If delivery is not available and current order type is delivery, switch to table
-            if (
-              data.deliveryAvailable === false &&
-              orderType === "delivery" &&
-              (hasAvailableTables || hasAvailableRooms)
-            ) {
+            if (data.deliveryAvailable === false && orderType === "delivery" && hasAvailableSeatingItems) {
               setOrderType("table")
             }
           }
@@ -249,11 +199,8 @@ export function CartPage() {
     return () => {
       try {
         // Safely unsubscribe
-        if (typeof tablesUnsubscribe === "function") {
-          tablesUnsubscribe()
-        }
-        if (typeof roomsUnsubscribe === "function") {
-          roomsUnsubscribe()
+        if (typeof seatingItemsUnsubscribe === "function") {
+          seatingItemsUnsubscribe()
         }
         if (typeof settingsUnsubscribe === "function") {
           settingsUnsubscribe()
@@ -261,11 +208,14 @@ export function CartPage() {
         if (typeof menuItemsUnsubscribe === "function") {
           menuItemsUnsubscribe()
         }
+        if (typeof seatingTypesUnsubscribe === "function") {
+          seatingTypesUnsubscribe()
+        }
       } catch (error) {
         console.error("Error unsubscribing:", error)
       }
     }
-  }, [toast, orderType, hasAvailableTables, hasAvailableRooms, isDeliveryAvailable])
+  }, [toast, orderType, hasAvailableSeatingItems, isDeliveryAvailable])
 
   // Calculate container costs based on items
   useEffect(() => {
@@ -286,12 +236,10 @@ export function CartPage() {
   }, [items, orderType, menuItems])
 
   // Handle table or room selection
-  const handleSelectTableOrRoom = (table: number | null, room: number | null) => {
+  const handleSelectTableOrRoom = (table: number | null, room: number | null, type: string | null = null) => {
     setTableNumber(table)
     setRoomNumber(room)
-
-    // Fetch previous orders for this table/room
-    fetchPreviousOrders(table, room)
+    setSeatingType(type)
   }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
@@ -348,10 +296,10 @@ export function CartPage() {
     }
 
     // Check if the selected order type is available
-    if (orderType === "table" && !hasAvailableTables && !hasAvailableRooms) {
+    if (orderType === "table" && !hasAvailableSeatingItems) {
       toast({
-        title: "Stollar va xonalar mavjud emas",
-        description: "Hozirda bo'sh stollar va xonalar mavjud emas. Iltimos, yetkazib berish xizmatidan foydalaning.",
+        title: "Bo'sh joylar mavjud emas",
+        description: "Hozirda bo'sh joylar mavjud emas. Iltimos, yetkazib berish xizmatidan foydalaning.",
         variant: "destructive",
       })
       return
@@ -360,7 +308,7 @@ export function CartPage() {
     if (orderType === "delivery" && !isDeliveryAvailable) {
       toast({
         title: "Yetkazib berish mavjud emas",
-        description: "Hozirda yetkazib berish xizmati mavjud emas. Iltimos, stol buyurtmasidan foydalaning.",
+        description: "Hozirda yetkazib berish xizmati mavjud emas. Iltimos, joy buyurtmasidan foydalaning.",
         variant: "destructive",
       })
       return
@@ -401,27 +349,21 @@ export function CartPage() {
         }
       }
 
-      // If table is selected, mark it as occupied
-      if (orderType === "table" && tableNumber) {
-        const success = await markTableAsOccupied(tableNumber)
-        if (!success) {
-          toast({
-            title: "Xatolik",
-            description: "Stol statusini yangilashda xatolik yuz berdi.",
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
-        }
-      }
+      // If seating item is selected, mark it as occupied
+      if (orderType === "table") {
+        let success = false
 
-      // If room is selected, mark it as occupied
-      if (orderType === "table" && roomNumber) {
-        const success = await markRoomAsOccupied(roomNumber)
+        if (roomNumber) {
+          // For rooms, always use "Xona" as the type
+          success = await markSeatingItemAsOccupied(roomNumber, "Xona")
+        } else if (tableNumber && seatingType) {
+          success = await markSeatingItemAsOccupied(tableNumber, seatingType)
+        }
+
         if (!success) {
           toast({
             title: "Xatolik",
-            description: "Xona statusini yangilashda xatolik yuz berdi.",
+            description: "Joy statusini yangilashda xatolik yuz berdi.",
             variant: "destructive",
           })
           setIsSubmitting(false)
@@ -450,6 +392,7 @@ export function CartPage() {
         orderType,
         tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
         roomNumber: orderType === "table" && roomNumber ? roomNumber : null,
+        seatingType: orderType === "table" ? seatingType : null,
         phoneNumber: phoneNumber || null,
         address: orderType === "delivery" ? address : null,
         items: orderItems,
@@ -464,11 +407,12 @@ export function CartPage() {
       // Add order to Firestore
       const docRef = await addDoc(collection(db, "orders"), orderData)
 
-      // Oxirgi tanlangan stol/xonani saqlash
+      // Oxirgi tanlangan joy ma'lumotlarini saqlash
       if (orderType === "table") {
         const lastOrderInfo = {
           tableNumber: tableNumber,
           roomNumber: roomNumber,
+          seatingType: seatingType,
           timestamp: new Date().toISOString(),
         }
         localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
@@ -545,73 +489,51 @@ export function CartPage() {
     },
   }
 
-  // Function to mark a table as occupied
-  const markTableAsOccupied = async (tableNumber: number): Promise<boolean> => {
+  // Function to mark a seating item as occupied
+  const markSeatingItemAsOccupied = async (itemNumber: number, itemType: string): Promise<boolean> => {
     try {
-      // Find the table by number
-      const tablesQuery = query(collection(db, "tables"), where("number", "==", tableNumber))
-      const tablesSnapshot = await getDocs(tablesQuery)
-      let tableId: string | null = null
+      // Make the query case-insensitive by using a more flexible approach
+      const seatingItemsQuery = query(
+        collection(db, "seatingItems"),
+        where("number", "==", itemNumber),
+        where("status", "==", "available"),
+      )
 
-      tablesSnapshot.forEach((doc) => {
-        tableId = doc.id
+      const seatingItemsSnapshot = await getDocs(seatingItemsQuery)
+      let seatingItemId: string | null = null
+
+      // Find the item with matching type (case-insensitive)
+      seatingItemsSnapshot.forEach((doc) => {
+        const data = doc.data()
+        if (data.type && data.type.toLowerCase() === itemType.toLowerCase()) {
+          seatingItemId = doc.id
+        }
       })
 
-      if (tableId) {
-        // Update table status to occupied
-        await updateDoc(doc(db, "tables", tableId), {
+      if (seatingItemId) {
+        // Update seating item status to occupied
+        await updateDoc(doc(db, "seatingItems", seatingItemId), {
           status: "occupied",
           updatedAt: new Date(),
         })
         return true
       } else {
-        console.error("Table not found")
-        return false
-      }
-    } catch (error) {
-      console.error("Error updating table status:", error)
-      return false
-    }
-  }
-
-  // Function to mark a room as occupied
-  const markRoomAsOccupied = async (roomNumber: number): Promise<boolean> => {
-    try {
-      // Find the room by number
-      const roomsQuery = query(collection(db, "rooms"), where("number", "==", roomNumber))
-      const roomsSnapshot = await getDocs(roomsQuery)
-      let roomId: string | null = null
-
-      roomsSnapshot.forEach((doc) => {
-        roomId = doc.id
-      })
-
-      if (roomId) {
-        // Update room status to occupied
-        await updateDoc(doc(db, "rooms", roomId), {
-          status: "occupied",
-          updatedAt: new Date(),
+        console.error(`${itemType} #${itemNumber} not found or not available`)
+        toast({
+          title: "Xatolik",
+          description: `Tanlangan ${itemType.toLowerCase()} topilmadi yoki band`,
+          variant: "destructive",
         })
-        return true
-      } else {
-        console.error("Room not found")
         return false
       }
     } catch (error) {
-      console.error("Error updating room status:", error)
+      console.error("Error updating seating item status:", error)
       return false
     }
-  }
-
-  // Calculate the grand total (current cart + previous orders)
-  const calculateGrandTotal = () => {
-    const currentCartTotal = orderType === "delivery" ? getTotalPrice() + deliveryFee + containerCost : getTotalPrice()
-
-    return currentCartTotal + totalFromPreviousOrders
   }
 
   // Check if any ordering option is available
-  const isOrderingAvailable = hasAvailableTables || hasAvailableRooms || isDeliveryAvailable
+  const isOrderingAvailable = hasAvailableSeatingItems || isDeliveryAvailable
 
   return (
     <div className="container mx-auto max-w-4xl p-4">
@@ -636,7 +558,7 @@ export function CartPage() {
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Buyurtma berish imkoni yo'q</AlertTitle>
           <AlertDescription>
-            Hozirda na stollar, na yetkazib berish xizmati mavjud emas. Iltimos, keyinroq qayta urinib ko'ring.
+            Hozirda na joylar, na yetkazib berish xizmati mavjud emas. Iltimos, keyinroq qayta urinib ko'ring.
           </AlertDescription>
         </Alert>
       )}
@@ -685,57 +607,6 @@ export function CartPage() {
                 </AnimatePresence>
               </CardContent>
             </Card>
-
-            {/* Previous orders from the same table */}
-            {orderType === "table" && previousOrders.length > 0 && (
-              <Card className="mt-4 border-amber-200 bg-amber-50">
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center text-amber-800">
-                    <Receipt className="mr-2 h-5 w-5" />
-                    Shu stoldan avvalgi buyurtmalar
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {previousOrders.map((order, index) => (
-                      <div key={index} className="flex items-center justify-between rounded-md bg-white p-2 shadow-sm">
-                        <div>
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {order.createdAt?.toDate
-                                ? new Date(order.createdAt.toDate()).toLocaleString("uz-UZ", {
-                                    dateStyle: "short",
-                                    timeStyle: "short",
-                                  })
-                                : ""}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-sm">
-                            {order.items.map((item, i) => (
-                              <span key={i} className="mr-1">
-                                {item.name} x{item.quantity}
-                                {i < order.items.length - 1 ? "," : ""}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <Badge variant="outline" className="mb-1 bg-white">
-                            {order.status === "pending"
-                              ? "Kutilmoqda"
-                              : order.status === "preparing"
-                                ? "Tayyorlanmoqda"
-                                : "Yakunlangan"}
-                          </Badge>
-                          <div className="font-medium">{formatCurrency(order.total)}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           <div className="md:col-span-2">
@@ -755,13 +626,13 @@ export function CartPage() {
                     </div>
                   ) : (
                     <Tabs
-                      defaultValue={hasAvailableTables || hasAvailableRooms ? "table" : "delivery"}
+                      defaultValue={hasAvailableSeatingItems ? "table" : "delivery"}
                       value={orderType}
                       onValueChange={(value) => setOrderType(value as "table" | "delivery")}
                     >
                       <TabsList className="mb-4 grid w-full grid-cols-2">
-                        <TabsTrigger value="table" disabled={!hasAvailableTables && !hasAvailableRooms}>
-                          Stol/Xona buyurtmasi
+                        <TabsTrigger value="table" disabled={!hasAvailableSeatingItems}>
+                          Joy buyurtmasi
                         </TabsTrigger>
                         <TabsTrigger value="delivery" disabled={!isDeliveryAvailable}>
                           Yetkazib berish
@@ -770,13 +641,12 @@ export function CartPage() {
 
                       {/* Table selection tab content */}
                       <TabsContent value="table" className="space-y-4">
-                        {!hasAvailableTables && !hasAvailableRooms ? (
+                        {!hasAvailableSeatingItems ? (
                           <Alert variant="destructive" className="mb-4">
                             <AlertTriangle className="h-4 w-4" />
-                            <AlertTitle>Stollar va xonalar mavjud emas</AlertTitle>
+                            <AlertTitle>Bo'sh joylar mavjud emas</AlertTitle>
                             <AlertDescription>
-                              Hozirda bo'sh stollar va xonalar mavjud emas. Iltimos, yetkazib berish xizmatidan
-                              foydalaning.
+                              Hozirda bo'sh joylar mavjud emas. Iltimos, yetkazib berish xizmatidan foydalaning.
                             </AlertDescription>
                           </Alert>
                         ) : (
@@ -786,7 +656,7 @@ export function CartPage() {
                                 htmlFor="table-number"
                                 className={validationErrors.tableOrRoom ? "text-destructive" : ""}
                               >
-                                Stol yoki xona
+                                Joy tanlash
                                 {validationErrors.tableOrRoom && <span className="ml-1 text-destructive">*</span>}
                               </Label>
                               <div className="mt-1">
@@ -798,7 +668,7 @@ export function CartPage() {
                                 />
                               </div>
                               {validationErrors.tableOrRoom && (
-                                <p className="mt-1 text-xs text-destructive">Iltimos, stol yoki xona tanlang</p>
+                                <p className="mt-1 text-xs text-destructive">Iltimos, joy tanlang</p>
                               )}
                             </div>
 
@@ -824,7 +694,7 @@ export function CartPage() {
                             <AlertTriangle className="h-4 w-4" />
                             <AlertTitle>Yetkazib berish mavjud emas</AlertTitle>
                             <AlertDescription>
-                              Hozirda yetkazib berish xizmati mavjud emas. Iltimos, stol buyurtmasidan foydalaning.
+                              Hozirda yetkazib berish xizmati mavjud emas. Iltimos, joy buyurtmasidan foydalaning.
                             </AlertDescription>
                           </Alert>
                         ) : (
@@ -905,30 +775,11 @@ export function CartPage() {
                       </>
                     )}
 
-                    {/* Show previous orders total if available */}
-                    {orderType === "table" && previousOrders.length > 0 && (
-                      <>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Joriy buyurtma:</span>
-                          <span>{formatCurrency(getTotalPrice())}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Avvalgi buyurtmalar:</span>
-                          <span>{formatCurrency(totalFromPreviousOrders)}</span>
-                        </div>
-                        <Separator className="my-2" />
-                      </>
-                    )}
-
                     <div className="flex items-center justify-between font-medium">
                       <span>Jami summa:</span>
                       <span className="text-lg text-primary">
                         {formatCurrency(
-                          orderType === "table" && previousOrders.length > 0
-                            ? calculateGrandTotal()
-                            : orderType === "delivery"
-                              ? getTotalPrice() + deliveryFee + containerCost
-                              : getTotalPrice(),
+                          orderType === "delivery" ? getTotalPrice() + deliveryFee + containerCost : getTotalPrice(),
                         )}
                       </span>
                     </div>
@@ -939,7 +790,7 @@ export function CartPage() {
                     disabled={
                       isSubmitting ||
                       items.length === 0 ||
-                      (orderType === "table" && !hasAvailableTables && !hasAvailableRooms) ||
+                      (orderType === "table" && !hasAvailableSeatingItems) ||
                       (orderType === "delivery" && !isDeliveryAvailable) ||
                       !isOrderingAvailable
                     }

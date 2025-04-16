@@ -107,8 +107,24 @@ export function MyOrdersPage() {
     return new Intl.DateTimeFormat("uz-UZ", {
       dateStyle: "medium",
       timeStyle: "short",
-      timeStyle: "short",
     }).format(date)
+  }
+
+  // Function to display the correct seating type
+  const getSeatingDisplay = (order: Order) => {
+    if (order.orderType !== "table") return "Yetkazib berish"
+
+    if (order.roomNumber) {
+      return `Xona #${order.roomNumber}`
+    }
+
+    if (order.tableNumber) {
+      // Use the seatingType if available, otherwise default to "Stol"
+      const seatingType = order.seatingType || "Stol"
+      return `${seatingType} #${order.tableNumber}`
+    }
+
+    return "Buyurtma"
   }
 
   return (
@@ -163,13 +179,7 @@ export function MyOrdersPage() {
               >
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center justify-between text-lg">
-                    {order.roomNumber ? (
-                      <span>Xona #{order.roomNumber}</span>
-                    ) : order.orderType === "table" ? (
-                      <span>Stol #{order.tableNumber}</span>
-                    ) : (
-                      <span>Yetkazib berish</span>
-                    )}
+                    <span>{getSeatingDisplay(order)}</span>
                     <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-base font-normal">
                       {getStatusIcon(order.status)}
                       <span className="capitalize">{getStatusText(order.status)}</span>
