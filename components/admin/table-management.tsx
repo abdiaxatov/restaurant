@@ -1049,14 +1049,31 @@ export function TableManagement() {
 
   // Update the handleEditItem function to correctly set the initial values
   const handleEditItem = (item: SeatingItem) => {
-    // Set the form values with the current item data
     setSelectedItem(item)
-    setNewItemNumber(item.number)
+    setNewItemNumber(item.number) // Set to the current item's number
     setNewItemSeats(item.seats)
-    setNewItemStatus(item.status)
     setNewItemType(item.type)
-    setNewItemWaiterId(item.waiterId || null)
+    setNewItemStatus(item.status)
+    setNewItemWaiterId(item.waiterId ?? null)
     setIsEditingItem(true)
+  }
+
+  // Add this effect to handle resetting newItemNumber when adding new items
+  useEffect(() => {
+    if (!isAddingItem && !isEditingItem) {
+      // Only update newItemNumber when adding new items
+      if (seatingItems.length > 0) {
+        const maxItemNumber = Math.max(...seatingItems.map((t) => t.number))
+        setNewItemNumber(maxItemNumber + 1)
+        setBatchItemStartNumber(maxItemNumber + 1)
+      }
+    }
+  }, [isAddingItem, isEditingItem, seatingItems])
+
+  // Also, update the dialog close handlers
+  const handleCloseEditDialog = () => {
+    setIsEditingItem(false)
+    setSelectedItem(null)
   }
 
   return (
@@ -1807,7 +1824,9 @@ export function TableManagement() {
       </Dialog>
 
       {/* Edit Item Dialog */}
-      <Dialog open={isEditingItem} onOpenChange={setIsEditingItem}>
+      <Dialog open={isEditingItem} onOpenChange={(open) => {
+        if (!open) handleCloseEditDialog()
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Joy elementini tahrirlash</DialogTitle>
