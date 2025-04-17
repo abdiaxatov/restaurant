@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { Loader2, CheckCircle2, ArrowLeft, User } from "lucide-react"
@@ -13,17 +13,32 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 import type { Order } from "@/types"
 import { getWaiterNameById } from "@/lib/table-service"
-import { getSeatingTypeDisplay } from "@/lib/receipt-service"
-import { Badge } from "@/components/ui/badge"
 
 export default function ConfirmationPage() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const orderId = searchParams.get("orderId")
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [waiterName, setWaiterName] = useState<string | null>(null)
+
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
+
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }
+
+    return order.tableType || "Stol"
+  }
 
   const getSeatingDisplay = (order: Order) => {
     const type = getSeatingTypeDisplay(order)
@@ -146,24 +161,13 @@ export default function ConfirmationPage() {
 
           <CardContent className="space-y-4">
             <div>
-              <h3 className="mb-2 font-medium">Buyurtma joyi</h3>
+              <h3 className="mb-2 font-medium">Buyurtma turi</h3>
               <p>{getSeatingDisplay(order)}</p>
             </div>
 
-            {order.isPaid && (
-              <div className="mt-2">
-                <h3 className="mb-2 font-medium">To'lov holati</h3>
-                <Badge variant="outline" className="bg-green-50 text-green-600">
-                  To'langan
-                </Badge>
-              </div>
-            )}
-
-            
-
             {waiterName && (
               <div>
-                <h3 className="mb-2 font-medium">Hizmat ko'ruvchi</h3>
+                <h3 className="mb-2 font-medium">Ofitsiant</h3>
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4 text-muted-foreground" />
                   <p>{waiterName}</p>
@@ -185,7 +189,7 @@ export default function ConfirmationPage() {
             )}
 
             <div>
-              <h3 className="mb-2 font-medium">Buyurtma ma'lumotlari</h3>
+              <h3 className="mb-2 font-medium">Buyurtma elementlari</h3>
               <ul className="space-y-2">
                 {order.items.map((item, index) => (
                   <li key={index} className="flex justify-between">
@@ -207,11 +211,6 @@ export default function ConfirmationPage() {
           </CardContent>
 
           <CardFooter className="flex flex-col space-y-2">
-            {order.isPaid && (
-              <Button className="w-full" onClick={() => router.push(`/receipt?orderId=${order.id}`)}>
-                Chekni ko'rish
-              </Button>
-            )}
             <Button asChild variant="outline" className="w-full">
               <Link href="/">
                 <ArrowLeft className="mr-2 h-4 w-4" />

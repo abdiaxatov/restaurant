@@ -1,14 +1,16 @@
 "use client"
 
+import type React from "react"
+
 import { useEffect, useState } from "react"
 import { doc, onSnapshot, collection, query, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
-import { Clock, CheckCircle, ChefHat, Utensils, MapPin, Phone, User, AlertCircle } from "lucide-react"
+import { Clock, CheckCircle, ChefHat, Utensils, MapPin, Phone, User, Receipt, Calendar } from "lucide-react"
 import type { Order } from "@/types"
 import { useRouter } from "next/navigation"
 import { getWaiterNameById } from "@/lib/table-service"
@@ -17,7 +19,6 @@ import { Badge } from "@/components/ui/badge"
 export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<string>("all")
   const [waiterNames, setWaiterNames] = useState<Record<string, string | null>>({})
   const router = useRouter()
 
@@ -56,7 +57,9 @@ export function OrderHistory() {
         // Get order IDs from localStorage
         const orderIds = JSON.parse(localStorage.getItem("myOrders") || "[]")
         // Ensure we have string IDs, not objects
-        const orderIdStrings = orderIds.map((id) => (typeof id === "object" && id.id ? id.id : id))
+        const orderIdStrings = Array.isArray(orderIds)
+          ? orderIds.map((id) => (typeof id === "object" && id.id ? id.id : String(id)))
+          : []
 
         if (orderIdStrings.length === 0) {
           setIsLoading(false)
@@ -170,7 +173,7 @@ export function OrderHistory() {
       case "ready":
         return <Utensils className="h-5 w-5 text-green-500" />
       case "completed":
-        return <Utensils className="h-5 w-5 text-green-700" />
+        return <CheckCircle className="h-5 w-5 text-blue-500" />
       case "paid":
         return <CheckCircle className="h-5 w-5 text-green-700" />
       default:
@@ -195,6 +198,69 @@ export function OrderHistory() {
     }
   }
 
+  const getStatusColors = (status: string, isPaid: boolean) => {
+    if (!isPaid) {
+      return {
+        bg: "bg-red-50",
+        border: "border-red-300",
+        header: "bg-red-100",
+        statusBg: "bg-red-100",
+        statusText: "text-red-700",
+      }
+    }
+
+    switch (status) {
+      case "pending":
+        return {
+          bg: "bg-amber-50",
+          border: "border-amber-200",
+          header: "bg-amber-100",
+          statusBg: "bg-amber-100",
+          statusText: "text-amber-700",
+        }
+      case "preparing":
+        return {
+          bg: "bg-blue-50",
+          border: "border-blue-200",
+          header: "bg-blue-100",
+          statusBg: "bg-blue-100",
+          statusText: "text-blue-700",
+        }
+      case "ready":
+        return {
+          bg: "bg-emerald-50",
+          border: "border-emerald-200",
+          header: "bg-emerald-100",
+          statusBg: "bg-emerald-100",
+          statusText: "text-emerald-700",
+        }
+      case "completed":
+        return {
+          bg: "bg-blue-50",
+          border: "border-blue-200",
+          header: "bg-blue-100",
+          statusBg: "bg-blue-100",
+          statusText: "text-blue-700",
+        }
+      case "paid":
+        return {
+          bg: "bg-green-50",
+          border: "border-green-200",
+          header: "bg-green-100",
+          statusBg: "bg-green-100",
+          statusText: "text-green-700",
+        }
+      default:
+        return {
+          bg: "bg-gray-50",
+          border: "border-gray-200",
+          header: "bg-gray-100",
+          statusBg: "bg-gray-100",
+          statusText: "text-gray-700",
+        }
+    }
+  }
+
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "N/A"
 
@@ -205,11 +271,14 @@ export function OrderHistory() {
     }).format(date)
   }
 
-  // Filter orders based on status
-  const filteredOrders = statusFilter === "all" ? orders : orders.filter((order) => order.status === statusFilter)
+  // Navigate to receipt page
+  const handleViewReceipt = (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation() // Prevent the card click from triggering
+    router.push(`/receipt/${orderId}`)
+  }
 
   // Sort orders by date (newest first)
-  const sortedOrders = [...filteredOrders].sort((a, b) => {
+  const sortedOrders = [...orders].sort((a, b) => {
     const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt)
     const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt)
     return dateB.getTime() - dateA.getTime()
@@ -219,7 +288,7 @@ export function OrderHistory() {
     return (
       <div className="space-y-4">
         {[1, 2].map((i) => (
-          <Card key={i}>
+          <Card key={i} className="overflow-hidden">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <Skeleton className="h-6 w-32" />
@@ -249,111 +318,112 @@ export function OrderHistory() {
   }
 
   return (
-    <div className="space-y-4">
-      <Tabs defaultValue="all" onValueChange={setStatusFilter}>
-        <TabsList className="mb-4 w-full flex-wrap">
-          <TabsTrigger value="all">Barchasi</TabsTrigger>
-          <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
-          <TabsTrigger value="preparing">Tayyorlanmoqda</TabsTrigger>
-          <TabsTrigger value="ready">Tayyor</TabsTrigger>
-          <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
-        </TabsList>
-      </Tabs>
+    <div className="space-y-6">
+      <div className="flex flex-col space-y-2">
+        <h2 className="text-2xl font-bold">Mening buyurtmalarim</h2>
+        <p className="text-muted-foreground">Barcha buyurtmalaringiz va ularning holati</p>
+      </div>
 
-      <div className="space-y-4">
-        {sortedOrders.map((order) => (
-          <Card
-            key={order.id}
-            className={`overflow-hidden cursor-pointer transition-all hover:shadow-md ${
-              order.isPaid === false ? "border-2 border-amber-400" : ""
-            }`}
-            onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
-          >
-            {order.isPaid === false && (
-              <div className="bg-amber-100 px-4 py-2 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <span className="text-amber-800 text-sm font-medium">To'lanmagan buyurtma</span>
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between text-lg">
-                <span>{getSeatingDisplay(order)}</span>
-                <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-base font-normal">
-                  {getStatusIcon(order.status)}
-                  <span className="capitalize">{getStatusText(order.status)}</span>
-                </div>
-              </CardTitle>
-              <div className="flex justify-between items-center">
-                <p className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</p>
-                {order.waiterId && waiterNames[order.waiterId] && (
-                  <Badge variant="outline" className="flex items-center gap-1">
-                    <User className="h-3 w-3" />
-                    <span>{waiterNames[order.waiterId]}</span>
+      <div className="grid gap-4 md:grid-cols-2">
+        {sortedOrders.map((order) => {
+          const isPaid = order.isPaid !== false
+          const status = order.status || "pending"
+          const colors = getStatusColors(status, isPaid)
+          // Only show receipt button when status is specifically "paid"
+          const showReceiptButton = status === "paid"
+
+          return (
+            <Card
+              key={order.id}
+              className={`overflow-hidden cursor-pointer transition-all hover:shadow-md border ${colors.border} ${colors.bg}`}
+              onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
+            >
+              <CardHeader className={`pb-2 ${colors.header}`}>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <span>{getSeatingDisplay(order)}</span>
+                    {!isPaid && (
+                      <Badge variant="destructive" className="text-xs">
+                        To'lanmagan
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <Badge
+                    className={`${colors.statusBg} ${colors.statusText} border-0 flex items-center gap-1 px-3 py-1`}
+                  >
+                    {getStatusIcon(status)}
+                    <span>{getStatusText(status)}</span>
                   </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {order.orderType === "delivery" && (
-                <div className="mb-3 space-y-1 rounded-md bg-muted p-3">
-                  {order.phoneNumber && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span>{order.phoneNumber}</span>
-                    </div>
-                  )}
-                  {order.address && (
-                    <div className="flex items-start gap-2 text-sm">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <span>{order.address}</span>
-                    </div>
-                  )}
                 </div>
-              )}
-
-              <div className="space-y-2">
-                {order.items.map((item, index) => (
-                  <div key={index} className="flex justify-between text-sm">
-                    <span>
-                      {item.name} × {item.quantity}
-                    </span>
-                    <span>{formatCurrency(item.price * item.quantity)}</span>
-                  </div>
-                ))}
-
+                <CardDescription className="flex items-center gap-2 mt-1">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>{formatDate(order.createdAt)}</span>
+                  {order.waiterId && waiterNames[order.waiterId] && (
+                    <Badge variant="outline" className="ml-auto flex items-center gap-1">
+                      <User className="h-3 w-3" />
+                      <span>{waiterNames[order.waiterId]}</span>
+                    </Badge>
+                  )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4">
                 {order.orderType === "delivery" && (
-                  <>
-                    {order.subtotal && (
-                      <div className="flex justify-between text-sm">
-                        <span>Taomlar narxi</span>
-                        <span>{formatCurrency(order.subtotal)}</span>
+                  <div className="mb-3 space-y-1 rounded-md bg-background/80 p-3">
+                    {order.phoneNumber && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Phone className="h-4 w-4 text-muted-foreground" />
+                        <span>{order.phoneNumber}</span>
                       </div>
                     )}
-                    {order.containerCost > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span>Idishlar narxi</span>
-                        <span>{formatCurrency(order.containerCost)}</span>
+                    {order.address && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <MapPin className="h-4 w-4 text-muted-foreground" />
+                        <span>{order.address}</span>
                       </div>
                     )}
-                    {order.deliveryFee > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span>Yetkazib berish narxi</span>
-                        <span>{formatCurrency(order.deliveryFee)}</span>
-                      </div>
-                    )}
-                  </>
+                  </div>
                 )}
 
-                <Separator className="my-2" />
+                <div className="space-y-2">
+                  {order.items.slice(0, 3).map((item, index) => (
+                    <div key={index} className="flex justify-between text-sm">
+                      <span className="font-medium">
+                        {item.name} × {item.quantity}
+                      </span>
+                      <span>{formatCurrency(item.price * item.quantity)}</span>
+                    </div>
+                  ))}
 
-                <div className="flex justify-between font-medium">
-                  <span>Jami</span>
-                  <span>{formatCurrency(order.total)}</span>
+                  {order.items.length > 3 && (
+                    <div className="text-sm text-muted-foreground italic">
+                      +{order.items.length - 3} ta qo'shimcha taom
+                    </div>
+                  )}
+
+                  <Separator className="my-2" />
+
+                  <div className="flex justify-between font-medium text-base">
+                    <span>Jami</span>
+                    <span className="font-bold">{formatCurrency(order.total)}</span>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+              {showReceiptButton && (
+                <CardFooter className="pt-0 flex justify-end">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className={`flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white`}
+                    onClick={(e) => handleViewReceipt(e, order.id)}
+                  >
+                    <Receipt className="h-4 w-4" />
+                    <span>Chek</span>
+                  </Button>
+                </CardFooter>
+              )}
+            </Card>
+          )
+        })}
       </div>
     </div>
   )
