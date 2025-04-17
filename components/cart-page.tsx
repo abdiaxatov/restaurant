@@ -57,6 +57,7 @@ export function CartPage() {
     address?: boolean
   }>({})
   const [waiterId, setWaiterId] = useState<string | null>(null)
+  const [waiterName, setWaiterName] = useState<string | null>(null)
   const [orderData, setOrderData] = useState<any>({})
   const [selectedTable, setSelectedTable] = useState<number | null>(null)
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null)
@@ -66,6 +67,7 @@ export function CartPage() {
   const [customerAddress, setCustomerAddress] = useState<string>("")
   const [paymentMethod, setPaymentMethod] = useState<string>("cash")
   const [notes, setNotes] = useState<string>("")
+  const [isUserRecentlyUsed, setIsUserRecentlyUsed] = useState<boolean>(false)
 
   // Check if there's a recent order and set the table/room automatically
   useEffect(() => {
@@ -84,6 +86,29 @@ export function CartPage() {
           if (lastOrderInfo.tableNumber) {
             setTableNumber(lastOrderInfo.tableNumber)
             setSeatingType(lastOrderInfo.seatingType || "Stol")
+            // Also set the waiterId if it exists in the lastOrderInfo
+            if (lastOrderInfo.waiterId) {
+              setWaiterId(lastOrderInfo.waiterId)
+              if (lastOrderInfo.waiterName) {
+                setWaiterName(lastOrderInfo.waiterName)
+              } else {
+                // If we have waiterId but no waiterName, try to get it
+                getDoc(doc(db, "users", lastOrderInfo.waiterId))
+                  .then((waiterDoc) => {
+                    if (waiterDoc.exists()) {
+                      const waiterData = waiterDoc.data()
+                      setWaiterName(waiterData.name)
+
+                      // Update lastOrderInfo with the waiter name
+                      lastOrderInfo.waiterName = waiterData.name
+                      localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                    }
+                  })
+                  .catch((error) => {
+                    console.error("Error getting waiter name:", error)
+                  })
+              }
+            }
             toast({
               title: "Joy avtomatik tanlandi",
               description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.tableNumber}-${lastOrderInfo.seatingType || "Stol"} avtomatik tanlandi.`,
@@ -91,6 +116,29 @@ export function CartPage() {
           } else if (lastOrderInfo.roomNumber) {
             setRoomNumber(lastOrderInfo.roomNumber)
             setSeatingType("Xona")
+            // Also set the waiterId if it exists in the lastOrderInfo
+            if (lastOrderInfo.waiterId) {
+              setWaiterId(lastOrderInfo.waiterId)
+              if (lastOrderInfo.waiterName) {
+                setWaiterName(lastOrderInfo.waiterName)
+              } else {
+                // If we have waiterId but no waiterName, try to get it
+                getDoc(doc(db, "users", lastOrderInfo.waiterId))
+                  .then((waiterDoc) => {
+                    if (waiterDoc.exists()) {
+                      const waiterData = waiterDoc.data()
+                      setWaiterName(waiterData.name)
+
+                      // Update lastOrderInfo with the waiter name
+                      lastOrderInfo.waiterName = waiterData.name
+                      localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                    }
+                  })
+                  .catch((error) => {
+                    console.error("Error getting waiter name:", error)
+                  })
+              }
+            }
             toast({
               title: "Xona avtomatik tanlandi",
               description: `Oxirgi buyurtmangiz asosida ${lastOrderInfo.roomNumber}-Xona avtomatik tanlandi.`,
@@ -251,13 +299,41 @@ export function CartPage() {
     room: number | null,
     type: string | null = null,
     waiterId: string | null = null,
+    userRecentlyUsed = false,
+    waiterName: string | null = null,
   ) => {
     setTableNumber(table)
     setRoomNumber(room)
     setSeatingType(type)
-    // Store the waiterId in state
     setWaiterId(waiterId)
-    console.log("Selected waiterId:", waiterId) // Add this for debugging
+    setWaiterName(waiterName)
+    setIsUserRecentlyUsed(userRecentlyUsed)
+
+    // If we have a waiterId but no waiterName, try to get it
+    if (waiterId && !waiterName) {
+      getDoc(doc(db, "users", waiterId))
+        .then((waiterDoc) => {
+          if (waiterDoc.exists()) {
+            const waiterData = waiterDoc.data()
+            setWaiterName(waiterData.name)
+
+            // Update lastOrderInfo with the waiter name if it exists
+            const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+            if (lastOrderInfoStr) {
+              const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+              if ((table && lastOrderInfo.tableNumber === table) || (room && lastOrderInfo.roomNumber === room)) {
+                lastOrderInfo.waiterName = waiterData.name
+                localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+              }
+            }
+          }
+        })
+        .catch((error) => {
+          console.error("Error getting waiter name:", error)
+        })
+    }
+
+    console.log("Selected waiterId:", waiterId, "Waiter name:", waiterName, "User recently used:", userRecentlyUsed)
   }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
@@ -314,7 +390,7 @@ export function CartPage() {
     }
 
     // Check if the selected order type is available
-    if (orderType === "table" && !hasAvailableSeatingItems) {
+    if (orderType === "table" && !hasAvailableSeatingItems && !isUserRecentlyUsed) {
       toast({
         title: "Bo'sh joylar mavjud emas",
         description: "Hozirda bo'sh joylar mavjud emas. Iltimos, yetkazib berish xizmatidan foydalaning.",
@@ -368,39 +444,13 @@ export function CartPage() {
       }
 
       // If seating item is selected, mark it as occupied
-      if (orderType === "table") {
-        let success = false
-
-        // Check if this is a recent order for the same table/room (within 30 minutes)
-        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
-        let isRecentOrder = false
-
-        if (lastOrderInfoStr) {
-          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
-          const lastOrderTime = new Date(lastOrderInfo.timestamp)
-          const currentTime = new Date()
-          const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
-
-          // If this is the same table/room as the recent order and within 30 minutes
-          if (diffInMinutes <= 30) {
-            if (
-              (roomNumber && lastOrderInfo.roomNumber === roomNumber) ||
-              (tableNumber && lastOrderInfo.tableNumber === tableNumber)
-            ) {
-              isRecentOrder = true
-              success = true
-            }
-          }
-        }
-
-        // If it's not a recent order for the same table, mark it as occupied
-        if (!isRecentOrder) {
-          if (roomNumber) {
-            // For rooms, always use "Xona" as the type
-            success = await markSeatingItemAsOccupied(roomNumber, "Xona")
-          } else if (tableNumber && seatingType) {
-            success = await markSeatingItemAsOccupied(tableNumber, seatingType)
-          }
+      let success = true
+      if (orderType === "table" && !isUserRecentlyUsed) {
+        if (roomNumber) {
+          // For rooms, always use "Xona" as the type
+          success = await markSeatingItemAsOccupied(roomNumber, "Xona")
+        } else if (tableNumber && seatingType) {
+          success = await markSeatingItemAsOccupied(tableNumber, seatingType)
         }
 
         if (!success) {
@@ -431,6 +481,13 @@ export function CartPage() {
         }
       })
 
+      // Get user signature for tracking orders
+      let userSignature = localStorage.getItem("userSignature")
+      if (!userSignature) {
+        userSignature = Math.random().toString(36).substring(2, 15)
+        localStorage.setItem("userSignature", userSignature)
+      }
+
       const orderData = {
         orderType,
         tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
@@ -445,15 +502,40 @@ export function CartPage() {
         total: totalWithDelivery,
         status: "pending",
         createdAt: serverTimestamp(),
-        // Include waiterId if available
+        userSignature: userSignature, // Add user signature to track orders
+        // Include waiterId and waiterName if available
         ...(waiterId ? { waiterId } : {}),
+        ...(waiterName ? { waiterName } : {}),
+      }
+
+      // Make sure we have the latest waiter information
+      if (orderType === "table") {
+        // Check if we have waiter info in localStorage
+        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+        if (lastOrderInfoStr) {
+          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+
+          // If this is the same table/room as in lastOrderInfo
+          if (
+            (tableNumber && lastOrderInfo.tableNumber === tableNumber) ||
+            (roomNumber && lastOrderInfo.roomNumber === roomNumber)
+          ) {
+            // Use the waiter info from lastOrderInfo
+            if (lastOrderInfo.waiterId) {
+              orderData.waiterId = lastOrderInfo.waiterId
+            }
+            if (lastOrderInfo.waiterName) {
+              orderData.waiterName = lastOrderInfo.waiterName
+            }
+          }
+        }
       }
 
       // Also add a debug log to check the final order data
       console.log("Order data being submitted:", orderData)
 
       // Add code to get the waiterId from the seating item and include it in the order
-      if (orderType === "table") {
+      if (orderType === "table" && !waiterId) {
         try {
           let seatingItemQuery
           if (roomNumber) {
@@ -478,6 +560,18 @@ export function CartPage() {
               const seatingItemData = seatingItemSnapshot.docs[0].data()
               if (seatingItemData.waiterId) {
                 orderData.waiterId = seatingItemData.waiterId
+
+                // Get waiter name
+                try {
+                  const waiterDoc = await getDoc(doc(db, "users", seatingItemData.waiterId))
+                  if (waiterDoc.exists()) {
+                    const waiterData = waiterDoc.data()
+                    orderData.waiterName = waiterData.name
+                    setWaiterName(waiterData.name)
+                  }
+                } catch (error) {
+                  console.error("Error getting waiter name:", error)
+                }
               }
             }
           }
@@ -486,22 +580,49 @@ export function CartPage() {
         }
       }
 
-      if (waiterId) {
-        orderData.waiterId = waiterId
-      }
-
       // Add order to Firestore
       const docRef = await addDoc(collection(db, "orders"), orderData)
 
       // Oxirgi tanlangan joy ma'lumotlarini saqlash
       if (orderType === "table") {
+        // Get waiter name if we have waiterId but no waiterName
+        let savedWaiterName = waiterName
+        if (waiterId && !savedWaiterName) {
+          try {
+            const waiterDoc = await getDoc(doc(db, "users", waiterId))
+            if (waiterDoc.exists()) {
+              savedWaiterName = waiterDoc.data().name
+            }
+          } catch (error) {
+            console.error("Error getting waiter name:", error)
+          }
+        }
+
         const lastOrderInfo = {
           tableNumber: tableNumber,
           roomNumber: roomNumber,
           seatingType: seatingType,
+          waiterId: waiterId,
+          waiterName: savedWaiterName,
           timestamp: new Date().toISOString(),
         }
         localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+
+        // Also store this order in myOrders with waiter info
+        const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        myOrders.push({
+          id: docRef.id,
+          tableNumber: tableNumber,
+          roomNumber: roomNumber,
+          waiterId: waiterId,
+          waiterName: savedWaiterName,
+        })
+        localStorage.setItem("myOrders", JSON.stringify(myOrders))
+      } else {
+        // For delivery orders, just store the order ID
+        const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        myOrders.push(docRef.id)
+        localStorage.setItem("myOrders", JSON.stringify(myOrders))
       }
 
       // Update remaining servings for each item
@@ -534,14 +655,10 @@ export function CartPage() {
       })
 
       // Store order ID in localStorage for "My Orders" page
-      const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
-      myOrders.push(docRef.id)
-      localStorage.setItem("myOrders", JSON.stringify(myOrders))
 
-      // Clear cart and redirect to confirmation page
       clearCart()
       router.push(`/confirmation?orderId=${docRef.id}`)
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error placing order:", error)
       toast({
         title: "Xatolik",
@@ -578,59 +695,105 @@ export function CartPage() {
   // Function to mark a seating item as occupied
   const markSeatingItemAsOccupied = async (itemNumber: number, itemType: string): Promise<boolean> => {
     try {
-      // Make the query case-insensitive by using a more flexible approach
-      const seatingItemsQuery = query(
-        collection(db, "seatingItems"),
-        where("number", "==", itemNumber),
-        where("status", "==", "available"),
-      )
+      // Check if this is a recently used item by the user (within 30 minutes)
+      const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+      if (lastOrderInfoStr) {
+        const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+        const lastOrderTime = new Date(lastOrderInfo.timestamp)
+        const currentTime = new Date()
+        const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
+
+        // If this is the same table/room as the recent order and within 30 minutes
+        if (
+          diffInMinutes <= 30 &&
+          ((itemType.toLowerCase() === "xona" && lastOrderInfo.roomNumber === itemNumber) ||
+            (itemType.toLowerCase() !== "xona" && lastOrderInfo.tableNumber === itemNumber))
+        ) {
+          console.log("Using recently used item:", itemType, itemNumber)
+          // If there's a waiterId in lastOrderInfo, use it
+          if (lastOrderInfo.waiterId) {
+            setWaiterId(lastOrderInfo.waiterId)
+            if (lastOrderInfo.waiterName) {
+              setWaiterName(lastOrderInfo.waiterName)
+            } else {
+              // If we have waiterId but no waiterName, try to get it
+              try {
+                const waiterDoc = await getDoc(doc(db, "users", lastOrderInfo.waiterId))
+                if (waiterDoc.exists()) {
+                  const waiterData = waiterDoc.data()
+                  setWaiterName(waiterData.name)
+
+                  // Update lastOrderInfo with the waiter name
+                  lastOrderInfo.waiterName = waiterData.name
+                  localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                }
+              } catch (error) {
+                console.error("Error getting waiter name:", error)
+              }
+            }
+          }
+          return true
+        }
+      }
+
+      // First try to find the item with exact type match
+      const seatingItemsQuery = query(collection(db, "seatingItems"), where("number", "==", itemNumber))
 
       const seatingItemsSnapshot = await getDocs(seatingItemsQuery)
-      let seatingItemId: string | null = null
 
       // Find the item with matching type (case-insensitive)
-      seatingItemsSnapshot.forEach((doc) => {
+      const matchingDocs = seatingItemsSnapshot.docs.filter((doc) => {
         const data = doc.data()
-        if (data.type && data.type.toLowerCase() === itemType.toLowerCase()) {
-          seatingItemId = doc.id
-        }
+        return data.type && data.type.toLowerCase() === itemType.toLowerCase()
       })
 
-      if (seatingItemId) {
-        // Update seating item status to occupied
-        await updateDoc(doc(db, "seatingItems", seatingItemId), {
+      if (matchingDocs.length > 0) {
+        // Found a match
+        const itemRef = doc(db, "seatingItems", matchingDocs[0].id)
+        const itemData = matchingDocs[0].data()
+
+        // Store the waiterId if available
+        if (itemData.waiterId) {
+          setWaiterId(itemData.waiterId)
+
+          // Get waiter name
+          try {
+            const waiterDoc = await getDoc(doc(db, "users", itemData.waiterId))
+            if (waiterDoc.exists()) {
+              const waiterData = waiterDoc.data()
+              setWaiterName(waiterData.name)
+
+              // Also update the lastOrderInfo with the waiter name
+              const lastOrderInfo = {
+                tableNumber: itemType.toLowerCase() !== "xona" ? itemNumber : null,
+                roomNumber: itemType.toLowerCase() === "xona" ? itemNumber : null,
+                seatingType: itemType,
+                waiterId: itemData.waiterId,
+                waiterName: waiterData.name,
+                timestamp: new Date().toISOString(),
+              }
+              localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+            }
+          } catch (error) {
+            console.error("Error getting waiter name:", error)
+          }
+        }
+
+        await updateDoc(itemRef, {
           status: "occupied",
           updatedAt: new Date(),
         })
         return true
-      } else {
-        // Check if we're in a recent order window (30 minutes)
-        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
-        if (lastOrderInfoStr) {
-          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
-          const lastOrderTime = new Date(lastOrderInfo.timestamp)
-          const currentTime = new Date()
-          const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
-
-          // If this is the same table/room as the recent order and within 30 minutes
-          if (
-            diffInMinutes <= 30 &&
-            ((itemType.toLowerCase() === "stol" && lastOrderInfo.tableNumber === itemNumber) ||
-              (itemType.toLowerCase() === "xona" && lastOrderInfo.roomNumber === itemNumber))
-          ) {
-            // Allow the order to proceed even if the item appears occupied
-            return true
-          }
-        }
-
-        console.error(`${itemType} #${itemNumber} not found or not available`)
-        toast({
-          title: "Xatolik",
-          description: `Tanlangan ${itemType.toLowerCase()} topilmadi yoki band`,
-          variant: "destructive",
-        })
-        return false
       }
+
+      // If we get here, no matching item was found
+      console.error(`${itemType} #${itemNumber} not found or not available`)
+      toast({
+        title: "Xatolik",
+        description: `Tanlangan ${itemType.toLowerCase()} topilmadi yoki band`,
+        variant: "destructive",
+      })
+      return false
     } catch (error: any) {
       console.error("Error updating seating item status:", error)
 
@@ -763,7 +926,7 @@ export function CartPage() {
                       onValueChange={(value) => setOrderType(value as "table" | "delivery")}
                     >
                       <TabsList className="mb-4 grid w-full grid-cols-2">
-                        <TabsTrigger value="table" disabled={!hasAvailableSeatingItems}>
+                        <TabsTrigger value="table" disabled={!hasAvailableSeatingItems && !isUserRecentlyUsed}>
                           Joy buyurtmasi
                         </TabsTrigger>
                         <TabsTrigger value="delivery" disabled={!isDeliveryAvailable}>
@@ -773,7 +936,7 @@ export function CartPage() {
 
                       {/* Table selection tab content */}
                       <TabsContent value="table" className="space-y-4">
-                        {!hasAvailableSeatingItems ? (
+                        {!hasAvailableSeatingItems && !isUserRecentlyUsed ? (
                           <Alert variant="destructive" className="mb-4">
                             <AlertTriangle className="h-4 w-4" />
                             <AlertTitle>Bo'sh joylar mavjud emas</AlertTitle>
@@ -922,9 +1085,9 @@ export function CartPage() {
                     disabled={
                       isSubmitting ||
                       items.length === 0 ||
-                      (orderType === "table" && !hasAvailableSeatingItems) ||
+                      (orderType === "table" && !hasAvailableSeatingItems && !isUserRecentlyUsed) ||
                       (orderType === "delivery" && !isDeliveryAvailable) ||
-                      !isOrderingAvailable
+                      (!isOrderingAvailable && !isUserRecentlyUsed)
                     }
                     onClick={handlePlaceOrder}
                   >

@@ -1,47 +1,112 @@
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore"
-import { db } from "@/lib/firebase"
-
-// Function to get waiter information for a seating item
-export async function getWaiterForSeatingItem(
-  type: string,
-  number: number,
-): Promise<{ id: string; name: string } | null> {
+export async function getWaiterForSeatingItem(itemType: string, itemNumber: number) {
   try {
-    // Query the seating item
-    const seatingItemsQuery = query(
-      collection(db, "seatingItems"),
-      where("type", "==", type),
-      where("number", "==", number),
-    )
+    // First check if we have this info in localStorage
+    const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+    if (lastOrderInfoStr) {
+      const lastOrderInfo = JSON.parse(lastOrderInfoStr)
 
-    const snapshot = await getDocs(seatingItemsQuery)
+      // Check if this is the same table/room
+      if (
+        (itemType.toLowerCase() === "xona" && lastOrderInfo.roomNumber === itemNumber) ||
+        (itemType.toLowerCase() !== "xona" && lastOrderInfo.tableNumber === itemNumber)
+      ) {
+        // If we have waiterId and waiterName in localStorage, use that
+        if (lastOrderInfo.waiterId && lastOrderInfo.waiterName) {
+          return {
+            id: lastOrderInfo.waiterId,
+            name: lastOrderInfo.waiterName,
+          }
+        }
 
-    if (snapshot.empty) {
-      return null
+        // If we only have waiterId, try to get the name
+        if (lastOrderInfo.waiterId) {
+          try {
+            const { db } = await import("@/lib/firebase")
+            const { doc, getDoc } = await import("firebase/firestore")
+
+            const waiterDoc = await getDoc(doc(db, "users", lastOrderInfo.waiterId))
+            if (waiterDoc.exists()) {
+              const waiterData = waiterDoc.data()
+              return {
+                id: lastOrderInfo.waiterId,
+                name: waiterData.name,
+              }
+            }
+          } catch (error) {
+            console.error("Error getting waiter name from Firestore:", error)
+          }
+        }
+      }
     }
 
-    const seatingItem = snapshot.docs[0].data()
+    // If we don't have the info in localStorage, try to get it from Firestore
+    try {
+      const { db } = await import("@/lib/firebase")
+      const { collection, query, where, getDocs, doc, getDoc } = await import("firebase/firestore")
 
-    // If no waiterId, return null
-    if (!seatingItem.waiterId) {
-      return null
+      // Query for the seating item
+      const seatingItemsQuery = query(
+        collection(db, "seatingItems"),
+        where("number", "==", itemNumber),
+        where("type", "==", itemType),
+      )
+
+      const seatingItemsSnapshot = await getDocs(seatingItemsQuery)
+
+      if (!seatingItemsSnapshot.empty) {
+        const seatingItemData = seatingItemsSnapshot.docs[0].data()
+
+        // If we have waiterId, get the waiter name
+        if (seatingItemData.waiterId) {
+          const waiterDoc = await getDoc(doc(db, "users", seatingItemData.waiterId))
+          if (waiterDoc.exists()) {
+            const waiterData = waiterDoc.data()
+            return {
+              id: seatingItemData.waiterId,
+              name: waiterData.name,
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error getting seating item from Firestore:", error)
     }
 
-    // Get the waiter information
-    const waiterDoc = await getDoc(doc(db, "users", seatingItem.waiterId))
+    // If we get here, we couldn't find the waiter info
+    return null
+  } catch (error) {
+    console.error("Error in getWaiterForSeatingItem:", error)
+    return null
+  }
+}
+
+// Function to get waiter name by ID
+export async function getWaiterNameById(waiterId: string): Promise<string | null> {
+  try {
+    if (!waiterId) return null
+
+    // First check if we have this info in localStorage
+    const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+    if (lastOrderInfoStr) {
+      const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+      if (lastOrderInfo.waiterId === waiterId && lastOrderInfo.waiterName) {
+        return lastOrderInfo.waiterName
+      }
+    }
+
+    // If not in localStorage, get from Firestore
+    const { db } = await import("@/lib/firebase")
+    const { doc, getDoc } = await import("firebase/firestore")
+
+    const waiterDoc = await getDoc(doc(db, "users", waiterId))
 
     if (!waiterDoc.exists()) {
       return null
     }
 
-    const waiterData = waiterDoc.data()
-
-    return {
-      id: seatingItem.waiterId,
-      name: waiterData.name,
-    }
+    return waiterDoc.data().name
   } catch (error) {
-    console.error("Error getting waiter for seating item:", error)
+    console.error("Error getting waiter name by ID:", error)
     return null
   }
 }
@@ -49,6 +114,9 @@ export async function getWaiterForSeatingItem(
 // Function to get all waiters
 export async function getAllWaiters(): Promise<{ id: string; name: string }[]> {
   try {
+    const { db } = await import("@/lib/firebase")
+    const { collection, query, where, getDocs } = await import("firebase/firestore")
+
     const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
     const snapshot = await getDocs(waitersQuery)
 
@@ -66,23 +134,5 @@ export async function getAllWaiters(): Promise<{ id: string; name: string }[]> {
   } catch (error) {
     console.error("Error getting all waiters:", error)
     return []
-  }
-}
-
-// Function to get waiter name by ID
-export async function getWaiterNameById(waiterId: string): Promise<string | null> {
-  try {
-    if (!waiterId) return null
-
-    const waiterDoc = await getDoc(doc(db, "users", waiterId))
-
-    if (!waiterDoc.exists()) {
-      return null
-    }
-
-    return waiterDoc.data().name
-  } catch (error) {
-    console.error("Error getting waiter name by ID:", error)
-    return null
   }
 }

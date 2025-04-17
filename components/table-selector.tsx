@@ -1,379 +1,835 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { collection, query, where, onSnapshot } from "firebase/firestore"
-import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Table, Loader2, Home, Sofa, Armchair } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { TableIcon, Home, Sofa, Armchair, User } from "lucide-react"
+import { collection, query, onSnapshot, where, getDocs, doc, getDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import { useToast } from "@/components/ui/use-toast"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+// Define useAuth outside the try-catch block
+let useAuth: any = () => ({ user: null })
+
+try {
+  // Try to dynamically import the useAuth hook
+  const adminAuthProvider = require("@/components/admin/admin-auth-provider")
+  if (adminAuthProvider && typeof adminAuthProvider.useAuth === "function") {
+    useAuth = adminAuthProvider.useAuth
+  }
+} catch (error) {
+  console.log("Admin auth provider not available in this context")
+}
 
 interface TableSelectorProps {
   selectedTable: number | null
   selectedRoom: number | null
-  onSelectTable: (table: number | null, room: number | null, type: string | null, waiterId: string | null) => void
+  onSelectTable: (
+    tableNumber: number | null,
+    roomNumber: number | null,
+    type?: string | null,
+    waiterId?: string | null,
+    userRecentlyUsed?: boolean,
+    waiterName?: string | null,
+  ) => void
   hasError?: boolean
 }
 
+type SeatingItem = {
+  id: string
+  number: number
+  seats: number
+  status: "available" | "occupied" | "reserved"
+  roomId?: string
+  type: string
+  waiterId?: string
+  waiterName?: string
+  userRecentlyUsed?: boolean
+}
+
 export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasError = false }: TableSelectorProps) {
-  const [tables, setTables] = useState<any[]>([])
-  const [rooms, setRooms] = useState<any[]>([])
-  const [divans, setDivans] = useState<any[]>([])
-  const [kreslos, setKreslos] = useState<any[]>([])
+  const [isOpen, setIsOpen] = useState(false)
+  const [seatingItems, setSeatingItems] = useState<SeatingItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState("tables")
-  const [waiters, setWaiters] = useState<any[]>([])
-  const [recentOrderInfo, setRecentOrderInfo] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState<string>("stol")
+  const [viewingRoom, setViewingRoom] = useState<SeatingItem | null>(null)
+  const [tablesInSelectedRoom, setTablesInSelectedRoom] = useState<SeatingItem[]>([])
+  const { toast } = useToast()
+  const auth = useAuth()
+  const user = auth?.user
+  const [seatingTypes, setSeatingTypes] = useState<string[]>([])
+  const [selectedSeatingType, setSelectedSeatingType] = useState<string | null>(null)
+  // First, add a state for storing waiter information
+  const [seatingWaiters, setSeatingWaiters] = useState<Record<string, { id: string; name: string }>>({})
+  const [waiterNames, setWaiterNames] = useState<Record<string, string>>({})
 
-  const handleFirebaseError = (error: any, context: string) => {
-    console.error(`Error ${context}:`, error)
-    // Check if it's an offline error
-    if (error.message && error.message.includes("offline")) {
-      // Handle offline scenario gracefully
-      return true // Return true to indicate it was an offline error
-    }
-    return false // Not an offline error
-  }
-
+  // Add this useEffect to fetch all waiter names
   useEffect(() => {
-    // Check for recent order info in localStorage
-    try {
-      const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
-      if (lastOrderInfoStr) {
-        const lastOrderInfo = JSON.parse(lastOrderInfoStr)
-        const lastOrderTime = new Date(lastOrderInfo.timestamp)
-        const currentTime = new Date()
+    const fetchWaiterNames = async () => {
+      try {
+        const waitersQuery = query(collection(db, "users"), where("role", "==", "waiter"))
+        const snapshot = await getDocs(waitersQuery)
 
-        // Calculate the difference in minutes
-        const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
-
-        // If the last order was within 30 minutes, store the info
-        if (diffInMinutes <= 30) {
-          setRecentOrderInfo(lastOrderInfo)
-        }
-      }
-    } catch (error) {
-      console.error("Error checking last order info:", error)
-    }
-  }, [])
-
-  useEffect(() => {
-    setIsLoading(true)
-
-    // Fetch waiters
-    const waitersUnsubscribe = onSnapshot(
-      query(collection(db, "users"), where("role", "==", "waiter")),
-      (snapshot) => {
-        const waitersData: any[] = []
-        snapshot.forEach((doc) => {
-          waitersData.push({ id: doc.id, ...doc.data() })
-        })
-        setWaiters(waitersData)
-      },
-      (error) => {
-        if (!handleFirebaseError(error, "fetching waiters")) {
-          console.error("Error fetching waiters:", error)
-        }
-      },
-    )
-
-    // Fetch all seating items without complex queries that require indexes
-    const seatingItemsUnsubscribe = onSnapshot(
-      collection(db, "seatingItems"),
-      (snapshot) => {
-        const tablesData: any[] = []
-        const roomsData: any[] = []
-        const divansData: any[] = []
-        const kreslosData: any[] = []
+        const names: Record<string, string> = {}
 
         snapshot.forEach((doc) => {
-          const item = { id: doc.id, ...doc.data() }
-
-          // If this is a recent order item and it's occupied, still show it to the same user
-          const isRecentOrderItem =
-            recentOrderInfo &&
-            ((item.type === "Stol" && item.number === recentOrderInfo.tableNumber) ||
-              (item.type === "Xona" && item.number === recentOrderInfo.roomNumber))
-
-          // Only show available items or the user's recent order item
-          if (item.status === "available" || isRecentOrderItem) {
-            switch (item.type?.toLowerCase()) {
-              case "stol":
-                tablesData.push(item)
-                break
-              case "xona":
-                roomsData.push(item)
-                break
-              case "divan":
-                divansData.push(item)
-                break
-              case "kreslo":
-                kreslosData.push(item)
-                break
-            }
+          const data = doc.data()
+          if (data.name) {
+            names[doc.id] = data.name
           }
         })
 
-        // Sort by number
-        tablesData.sort((a, b) => a.number - b.number)
-        roomsData.sort((a, b) => a.number - b.number)
-        divansData.sort((a, b) => a.number - b.number)
-        kreslosData.sort((a, b) => a.number - b.number)
+        setWaiterNames(names)
+      } catch (error) {
+        console.error("Error fetching waiter names:", error)
+      }
+    }
 
-        setTables(tablesData)
-        setRooms(roomsData)
-        setDivans(divansData)
-        setKreslos(kreslosData)
-        setIsLoading(false)
-      },
-      (error) => {
-        if (!handleFirebaseError(error, "fetching seating items")) {
-          console.error("Error fetching seating items:", error)
+    fetchWaiterNames()
+  }, [])
+
+  // Add this useEffect to fetch waiter information for all seating items
+  useEffect(() => {
+    const fetchSeatingWaiters = async () => {
+      try {
+        const seatingItemsQuery = query(collection(db, "seatingItems"))
+        const snapshot = await getDocs(seatingItemsQuery)
+
+        const waiterData: Record<string, { id: string; name: string }> = {}
+
+        for (const docSnapshot of snapshot.docs) {
+          const data = docSnapshot.data()
+          if (data.waiterId) {
+            // Create a key using type and number
+            const key = `${data.type}-${data.number}`
+
+            // Get waiter name from our cached names or fetch it
+            let waiterName = waiterNames[data.waiterId]
+
+            if (!waiterName) {
+              try {
+                const waiterDoc = await getDoc(doc(db, "users", data.waiterId))
+                if (waiterDoc.exists()) {
+                  const waiterInfo = waiterDoc.data()
+                  waiterName = waiterInfo.name || "Belgilanmagan"
+                } else {
+                  waiterName = "Belgilanmagan"
+                }
+              } catch (error) {
+                console.error("Error getting waiter name:", error)
+                waiterName = "Belgilanmagan"
+              }
+            }
+
+            waiterData[key] = {
+              id: data.waiterId,
+              name: waiterName,
+            }
+          }
         }
-        setIsLoading(false)
-      },
+
+        setSeatingWaiters(waiterData)
+      } catch (error) {
+        console.error("Error fetching seating waiters:", error)
+      }
+    }
+
+    if (Object.keys(waiterNames).length > 0) {
+      fetchSeatingWaiters()
+    }
+  }, [waiterNames])
+
+  // Now update the handleSelectItem function to pass the waiterId and waiterName
+  const handleSelectItem = (item: SeatingItem) => {
+    const isRoom = item.type.toLowerCase() === "xona"
+
+    // Get the waiterId and waiterName for this seating item
+    let waiterId = item.waiterId || null
+    let waiterName = item.waiterName || null
+
+    // If this is a user-recently-used item, check if we have waiter info in localStorage
+    if (item.userRecentlyUsed) {
+      const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+      if (lastOrderInfoStr) {
+        const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+        if (lastOrderInfo.waiterId) {
+          waiterId = lastOrderInfo.waiterId
+          waiterName = lastOrderInfo.waiterName || waiterNames[waiterId] || null
+        }
+      }
+    } else {
+      // For available items, check if we have waiter info in our state
+      const key = `${item.type}-${item.number}`
+      const waiterInfo = seatingWaiters[key]
+      if (waiterInfo) {
+        waiterId = waiterInfo.id
+        waiterName = waiterInfo.name
+      }
+    }
+
+    // If we have a waiterId but no waiterName, try to get it from our cached names
+    if (waiterId && !waiterName && waiterNames[waiterId]) {
+      waiterName = waiterNames[waiterId]
+    }
+
+    // If we still don't have a waiterName, try to get it from Firestore
+    if (waiterId && !waiterName) {
+      const waiterDocRef = doc(db, "users", waiterId)
+      getDoc(waiterDocRef)
+        .then((waiterDocSnapshot) => {
+          if (waiterDocSnapshot.exists()) {
+            waiterName = waiterDocSnapshot.data().name
+
+            // Save to localStorage for future reference
+            const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+            if (lastOrderInfoStr) {
+              const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+              lastOrderInfo.waiterName = waiterName
+              localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+            }
+
+            // Now call onSelectTable with all the info
+            if (isRoom) {
+              onSelectTable(null, item.number, item.type, waiterId, item.userRecentlyUsed, waiterName)
+            } else {
+              onSelectTable(item.number, null, item.type, waiterId, item.userRecentlyUsed, waiterName)
+            }
+          }
+        })
+        .catch((error) => {
+          console.error("Error getting waiter name:", error)
+          // Still call onSelectTable even if there's an error
+          if (isRoom) {
+            onSelectTable(null, item.number, item.type, waiterId, item.userRecentlyUsed, waiterName)
+          } else {
+            onSelectTable(item.number, null, item.type, waiterId, item.userRecentlyUsed, waiterName)
+          }
+        })
+    } else {
+      // We already have all the info, so call onSelectTable directly
+      if (isRoom) {
+        onSelectTable(null, item.number, item.type, waiterId, item.userRecentlyUsed, waiterName)
+      } else {
+        onSelectTable(item.number, null, item.type, waiterId, item.userRecentlyUsed, waiterName)
+      }
+    }
+
+    console.log(
+      "Selected item:",
+      item.number,
+      item.type,
+      "Waiter:",
+      waiterId,
+      waiterName,
+      "Recently used:",
+      item.userRecentlyUsed,
     )
 
+    setIsOpen(false)
+    setViewingRoom(null)
+  }
+
+  // Fix the useEffect to prevent automatic selection from changing
+  useEffect(() => {
+    // Initialize with empty functions to avoid undefined errors
+    let itemsUnsubscribe = () => {}
+    let typesUnsubscribe = () => {}
+
+    const fetchData = async () => {
+      try {
+        // Get the user's previous orders from localStorage
+        const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+        let lastSelectedTable = null
+        let lastSelectedRoom = null
+        let lastSelectedType = null
+        let lastWaiterId = null
+        let lastWaiterName = null
+
+        // Agar oxirgi buyurtma ma'lumotlari saqlangan bo'lsa
+        if (lastOrderInfoStr) {
+          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+          if (lastOrderInfo.tableNumber) {
+            lastSelectedTable = lastOrderInfo.tableNumber
+            lastSelectedType = lastOrderInfo.seatingType || "Stol"
+            lastWaiterId = lastOrderInfo.waiterId || null
+            lastWaiterName = lastOrderInfo.waiterName || null
+
+            // If we have waiterId but no waiterName, try to get it from our cached names
+            if (lastWaiterId && !lastWaiterName && waiterNames[lastWaiterId]) {
+              lastWaiterName = waiterNames[lastWaiterId]
+            }
+          } else if (lastOrderInfo.roomNumber) {
+            lastSelectedRoom = lastOrderInfo.roomNumber
+            lastSelectedType = "Xona"
+            lastWaiterId = lastOrderInfo.waiterId || null
+            lastWaiterName = lastOrderInfo.waiterName || null
+
+            // If we have waiterId but no waiterName, try to get it from our cached names
+            if (lastWaiterId && !lastWaiterName && waiterNames[lastWaiterId]) {
+              lastWaiterName = waiterNames[lastWaiterId]
+            }
+          }
+        }
+
+        // Fetch previous orders to get tables/rooms the user has ordered from
+        const userPreviousItems = new Map<string, Set<number>>()
+
+        if (myOrders.length > 0) {
+          // Fetch order details to get table/room numbers
+          for (const orderId of myOrders) {
+            try {
+              const orderDoc = await getDoc(doc(db, "orders", orderId))
+              if (orderDoc.exists()) {
+                const orderData = orderDoc.data()
+                if (orderData.tableNumber) {
+                  if (!userPreviousItems.has("table")) {
+                    userPreviousItems.set("table", new Set())
+                  }
+                  userPreviousItems.get("table")?.add(orderData.tableNumber)
+
+                  // Save waiter info if available
+                  if (orderData.waiterId && orderData.waiterName) {
+                    // Update lastOrderInfo with the latest waiter info
+                    if (lastOrderInfoStr) {
+                      const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+                      if (lastOrderInfo.tableNumber === orderData.tableNumber) {
+                        lastOrderInfo.waiterId = orderData.waiterId
+                        lastOrderInfo.waiterName = orderData.waiterName
+                        localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                      }
+                    }
+                  }
+                }
+                if (orderData.roomNumber) {
+                  if (!userPreviousItems.has("room")) {
+                    userPreviousItems.set("room", new Set())
+                  }
+                  userPreviousItems.get("room")?.add(orderData.roomNumber)
+
+                  // Save waiter info if available
+                  if (orderData.waiterId && orderData.waiterName) {
+                    // Update lastOrderInfo with the latest waiter info
+                    if (lastOrderInfoStr) {
+                      const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+                      if (lastOrderInfo.roomNumber === orderData.roomNumber) {
+                        lastOrderInfo.waiterId = orderData.waiterId
+                        lastOrderInfo.waiterName = orderData.waiterName
+                        localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              console.error("Error fetching order:", error)
+            }
+          }
+        }
+
+        // Only set automatic selection if no selection has been made yet
+        if (!selectedTable && !selectedRoom) {
+          if (lastSelectedTable) {
+            onSelectTable(lastSelectedTable, null, lastSelectedType, lastWaiterId, true, lastWaiterName)
+            setSelectedSeatingType(lastSelectedType)
+          } else if (lastSelectedRoom) {
+            onSelectTable(null, lastSelectedRoom, "Xona", lastWaiterId, true, lastWaiterName)
+            setSelectedSeatingType("Xona")
+          }
+        }
+
+        // Fetch seating types
+        typesUnsubscribe = onSnapshot(
+          collection(db, "seatingTypes"),
+          (snapshot) => {
+            const types = new Set<string>()
+            snapshot.forEach((doc) => {
+              const typeData = doc.data()
+              if (typeData.name) {
+                types.add(typeData.name)
+              }
+            })
+
+            // If no types are found, add default types
+            if (types.size === 0) {
+              types.add("Stol")
+              types.add("Xona")
+            }
+
+            const typesArray = Array.from(types)
+            setSeatingTypes(typesArray)
+
+            // Set default active tab if not already set
+            if (!activeTab || !typesArray.includes(activeTab.toLowerCase())) {
+              setActiveTab(typesArray[0].toLowerCase())
+            }
+          },
+          (error) => {
+            console.error("Error fetching seating types:", error)
+          },
+        )
+
+        // Fetch seating items
+        let itemsQuery
+
+        if (user && user.role === "waiter") {
+          // If user is a waiter, only show items assigned to them
+          itemsQuery = query(
+            collection(db, "seatingItems"),
+            where("status", "==", "available"),
+            where("waiterId", "==", user.id),
+          )
+        } else {
+          // For admin, chef, and customers, show all available items
+          itemsQuery = query(collection(db, "seatingItems"), where("status", "==", "available"))
+        }
+
+        itemsUnsubscribe = onSnapshot(
+          itemsQuery,
+          (snapshot) => {
+            const itemsData: SeatingItem[] = []
+            snapshot.forEach((doc) => {
+              const data = doc.data()
+
+              // Add waiter name if we have it in our cache
+              let waiterName = null
+              if (data.waiterId && waiterNames[data.waiterId]) {
+                waiterName = waiterNames[data.waiterId]
+              }
+
+              itemsData.push({
+                id: doc.id,
+                ...data,
+                waiterName,
+              } as SeatingItem)
+            })
+
+            // Also fetch occupied items that the user has previously ordered from
+            const fetchOccupiedItems = async () => {
+              try {
+                const occupiedItemsQuery = query(collection(db, "seatingItems"), where("status", "==", "occupied"))
+                const occupiedItemsSnapshot = await getDocs(occupiedItemsQuery)
+
+                occupiedItemsSnapshot.forEach((doc) => {
+                  const itemData = doc.data() as SeatingItem
+                  // Fix: Add null check for type property
+                  const itemType = (itemData.type || "").toLowerCase()
+                  const itemNumber = itemData.number
+
+                  // Check if this is a previously used item
+                  let shouldAdd = false
+
+                  if (itemType === "xona" && userPreviousItems.has("room")) {
+                    shouldAdd = userPreviousItems.get("room")?.has(itemNumber) || false
+                  } else if (userPreviousItems.has("table")) {
+                    shouldAdd = userPreviousItems.get("table")?.has(itemNumber) || false
+                  }
+
+                  if (shouldAdd) {
+                    // Add waiter name if we have it in our cache
+                    let waiterName = itemData.waiterName || null
+                    if (itemData.waiterId && waiterNames[itemData.waiterId]) {
+                      waiterName = waiterNames[itemData.waiterId]
+                    }
+
+                    itemsData.push({
+                      id: doc.id,
+                      ...itemData,
+                      waiterName,
+                    })
+                  }
+                })
+
+                // Sort items by type and number
+                itemsData.sort((a, b) => {
+                  if (a.type !== b.type) {
+                    return (a.type || "").localeCompare(b.type || "")
+                  }
+                  return a.number - b.number
+                })
+
+                setSeatingItems(itemsData)
+                setIsLoading(false)
+              } catch (error) {
+                console.error("Error fetching occupied items:", error)
+                setIsLoading(false)
+              }
+            }
+
+            if (userPreviousItems.size > 0) {
+              fetchOccupiedItems()
+            } else {
+              // Sort items by type and number
+              itemsData.sort((a, b) => {
+                if (a.type !== b.type) {
+                  return (a.type || "").localeCompare(b.type || "")
+                }
+                return a.number - b.number
+              })
+
+              setSeatingItems(itemsData)
+              setIsLoading(false)
+            }
+
+            // Replace the fetchUserSpecificOccupiedItems function with this improved version
+            const fetchUserSpecificOccupiedItems = async () => {
+              try {
+                // Get user's "signature" - we'll use this to track which tables they've used
+                let userSignature = localStorage.getItem("userSignature")
+                if (!userSignature) {
+                  userSignature = Math.random().toString(36).substring(2, 15)
+                  localStorage.setItem("userSignature", userSignature)
+                }
+
+                // First, fetch occupied items
+                const occupiedItemsQuery = query(collection(db, "seatingItems"), where("status", "==", "occupied"))
+                const occupiedItemsSnapshot = await getDocs(occupiedItemsQuery)
+
+                // Get the last order info from localStorage
+                const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+                if (lastOrderInfoStr) {
+                  const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+                  const lastOrderTime = new Date(lastOrderInfo.timestamp || Date.now())
+                  const currentTime = new Date()
+
+                  // Calculate the difference in minutes
+                  const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
+
+                  // If the last order was within 30 minutes
+                  if (diffInMinutes <= 30) {
+                    // Add occupied items that match the user's recent order
+                    for (const docSnapshot of occupiedItemsSnapshot.docs) {
+                      const itemData = docSnapshot.data() as SeatingItem
+                      const itemType = (itemData.type || "").toLowerCase()
+                      const itemNumber = itemData.number
+
+                      // Check if this item matches the last order
+                      let shouldAdd = false
+                      if (itemType === "xona" && lastOrderInfo.roomNumber === itemNumber) {
+                        shouldAdd = true
+                      } else if (itemType !== "xona" && lastOrderInfo.tableNumber === itemNumber) {
+                        shouldAdd = true
+                      }
+
+                      if (shouldAdd) {
+                        // Generate a unique key for this item to avoid duplicate keys
+                        const uniqueId = `${docSnapshot.id}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+
+                        // Get waiter name from lastOrderInfo or from our cache
+                        let waiterName = lastOrderInfo.waiterName || null
+                        const waiterId = lastOrderInfo.waiterId || itemData.waiterId || null
+
+                        if (!waiterName && waiterId && waiterNames[waiterId]) {
+                          waiterName = waiterNames[waiterId]
+                        }
+
+                        // If we still don't have a waiter name but have a waiterId, try to get it from Firestore
+                        if (!waiterName && waiterId) {
+                          try {
+                            const waiterDocRef = doc(db, "users", waiterId)
+                            const waiterDocSnapshot = await getDoc(waiterDocRef)
+                            if (waiterDocSnapshot.exists()) {
+                              waiterName = waiterDocSnapshot.data().name
+
+                              // Update lastOrderInfo with the waiter name
+                              lastOrderInfo.waiterName = waiterName
+                              localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
+                            }
+                          } catch (error) {
+                            console.error("Error getting waiter name:", error)
+                          }
+                        }
+
+                        // Mark this as a recently used item by this user
+                        // Also add waiter information if available
+                        itemsData.push({
+                          id: uniqueId, // Use the unique ID to avoid duplicate keys
+                          ...itemData,
+                          userRecentlyUsed: true,
+                          waiterId: waiterId,
+                          waiterName: waiterName,
+                        })
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error("Error fetching user-specific occupied items:", error)
+              }
+            }
+
+            // Call this function after setting up the basic listeners
+            if (!user || user.role !== "waiter") {
+              fetchUserSpecificOccupiedItems()
+            }
+          },
+          (error) => {
+            console.error("Error fetching seating items:", error)
+            toast({
+              title: "Xatolik",
+              description: "Joy elementlarini yuklashda xatolik yuz berdi",
+              variant: "destructive",
+            })
+            setIsLoading(false)
+          },
+        )
+      } catch (error) {
+        console.error("Error setting up listeners:", error)
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+
+    // Clean up function
     return () => {
       try {
-        seatingItemsUnsubscribe()
-        waitersUnsubscribe()
+        if (typeof itemsUnsubscribe === "function") {
+          itemsUnsubscribe()
+        }
+        if (typeof typesUnsubscribe === "function") {
+          typesUnsubscribe()
+        }
       } catch (error) {
         console.error("Error unsubscribing:", error)
       }
     }
-  }, [recentOrderInfo])
+  }, [toast, user, auth, activeTab, selectedTable, selectedRoom, onSelectTable, waiterNames])
 
-  const getWaiterName = (waiterId: string | null | undefined) => {
-    if (!waiterId) return null
-    const waiter = waiters.find((w) => w.id === waiterId)
-    return waiter ? waiter.name : null
+  // When a room is selected for viewing, fetch tables in that room
+  useEffect(() => {
+    if (!viewingRoom) {
+      setTablesInSelectedRoom([])
+      return
+    }
+
+    const fetchTablesInRoom = async () => {
+      try {
+        const tablesInRoomQuery = query(
+          collection(db, "seatingItems"),
+          where("roomId", "==", viewingRoom.id),
+          where("status", "==", "available"),
+        )
+
+        const tablesSnapshot = await getDocs(tablesInRoomQuery)
+        const tablesData: SeatingItem[] = []
+
+        tablesSnapshot.forEach((doc) => {
+          const data = doc.data()
+
+          // Add waiter name if we have it in our cache
+          let waiterName = null
+          if (data.waiterId && waiterNames[data.waiterId]) {
+            waiterName = waiterNames[data.waiterId]
+          }
+
+          tablesData.push({
+            id: doc.id,
+            ...data,
+            waiterName,
+          } as SeatingItem)
+        })
+
+        // Sort tables by number
+        tablesData.sort((a, b) => a.number - b.number)
+        setTablesInSelectedRoom(tablesData)
+      } catch (error) {
+        console.error("Error fetching tables in room:", error)
+        toast({
+          title: "Xatolik",
+          description: "Xonadagi stollarni yuklashda xatolik yuz berdi",
+          variant: "destructive",
+        })
+      }
+    }
+
+    if (viewingRoom) {
+      fetchTablesInRoom()
+    }
+  }, [viewingRoom, toast, waiterNames])
+
+  const handleViewRoom = (room: SeatingItem) => {
+    setViewingRoom(room)
   }
 
-  const handleSelectItem = (number: number, type: string, waiterId: string | null) => {
-    if (type.toLowerCase() === "xona") {
-      onSelectTable(null, number, type, waiterId)
-    } else {
-      onSelectTable(number, null, type, waiterId)
+  const handleBackToRooms = () => {
+    setViewingRoom(null)
+  }
+
+  // Get icon for seating type
+  const getTypeIcon = (type: string) => {
+    switch ((type || "").toLowerCase()) {
+      case "stol":
+        return <Table className="h-4 w-4" />
+      case "xona":
+        return <Home className="h-4 w-4" />
+      case "divan":
+        return <Sofa className="h-4 w-4" />
+      case "kreslo":
+        return <Armchair className="h-4 w-4" />
+      default:
+        return <Table className="h-4 w-4" />
     }
   }
 
+  // Get the selected item info for display
+  const getSelectionDisplay = () => {
+    if (selectedRoom) {
+      const room = seatingItems.find(
+        (item) => item.number === selectedRoom && (item.type || "").toLowerCase() === "xona",
+      )
+      return room ? `${room.number}-${room.type} (${room.seats} kishilik)` : `${selectedRoom}-Xona`
+    }
+
+    if (selectedTable) {
+      const table = seatingItems.find((item) => item.number === selectedTable && item.type === selectedSeatingType)
+      return table
+        ? `${table.number}-${table.type} (${table.seats} kishilik)`
+        : `${selectedTable}-${selectedSeatingType || "Joy"}`
+    }
+
+    return "Joy tanlang"
+  }
+
   return (
-    <div className={`rounded-md border ${hasError ? "border-destructive" : "border-input"} p-1`}>
-      <Tabs defaultValue="tables" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="tables" className="flex items-center gap-1">
-            <TableIcon className="h-4 w-4" />
-            <span className="hidden sm:inline">Stollar</span>
-          </TabsTrigger>
-          <TabsTrigger value="rooms" className="flex items-center gap-1">
-            <Home className="h-4 w-4" />
-            <span className="hidden sm:inline">Xonalar</span>
-          </TabsTrigger>
-          <TabsTrigger value="divans" className="flex items-center gap-1">
-            <Sofa className="h-4 w-4" />
-            <span className="hidden sm:inline">Divanlar</span>
-          </TabsTrigger>
-          <TabsTrigger value="kreslos" className="flex items-center gap-1">
-            <Armchair className="h-4 w-4" />
-            <span className="hidden sm:inline">Kreslolar</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="tables" className="mt-2">
-          {isLoading ? (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : tables.length === 0 ? (
-            <p className="py-3 text-center text-sm text-muted-foreground">Bo'sh stollar mavjud emas</p>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className={`w-full justify-start ${hasError ? "border-destructive" : ""}`}>
+          {selectedRoom ? (
+            <Home className="mr-2 h-4 w-4" />
+          ) : selectedSeatingType ? (
+            getTypeIcon(selectedSeatingType)
           ) : (
-            <ScrollArea className="h-[200px]">
-              <div className="grid grid-cols-4 gap-2 p-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-                {tables.map((table) => {
-                  const isSelected = selectedTable === table.number && !selectedRoom
-                  const waiterName = getWaiterName(table.waiterId)
-                  const isRecentOrderItem =
-                    recentOrderInfo &&
-                    table.number === recentOrderInfo.tableNumber &&
-                    recentOrderInfo.seatingType === "Stol"
-
-                  return (
-                    <Button
-                      key={table.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className={`relative h-auto min-h-12 w-full flex-col items-center justify-center p-2 ${
-                        isRecentOrderItem && table.status !== "available" ? "border-amber-500 bg-amber-50" : ""
-                      }`}
-                      onClick={() => handleSelectItem(table.number, "Stol", table.waiterId)}
-                    >
-                      <span className="text-base font-medium">{table.number}</span>
-                      {table.seats && <span className="text-xs text-muted-foreground">{table.seats} kishi</span>}
-                      {waiterName && (
-                        <div className="mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                          <User className="h-3 w-3" />
-                          <span className="truncate">{waiterName}</span>
-                        </div>
-                      )}
-                      {isRecentOrderItem && table.status !== "available" && (
-                        <Badge className="absolute -right-1 -top-1 bg-amber-500">Sizning</Badge>
-                      )}
-                    </Button>
-                  )
-                })}
-              </div>
-            </ScrollArea>
+            <Table className="mr-2 h-4 w-4" />
           )}
-        </TabsContent>
+          {getSelectionDisplay()}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>
+            {viewingRoom ? `${viewingRoom.number}-${viewingRoom.type} (${viewingRoom.seats} kishilik)` : "Joy tanlash"}
+          </DialogTitle>
+        </DialogHeader>
 
-        <TabsContent value="rooms" className="mt-2">
-          {isLoading ? (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+        {isLoading ? (
+          <div className="flex h-60 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : viewingRoom ? (
+          // Show tables in the selected room
+          <div>
+            <Button variant="ghost" onClick={handleBackToRooms} className="mb-4">
+              ← Orqaga qaytish
+            </Button>
+
+            <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
+              {tablesInSelectedRoom.length === 0 ? (
+                <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                  <p className="text-muted-foreground">Bu xonada bo'sh stollar topilmadi</p>
+                </div>
+              ) : (
+                tablesInSelectedRoom.map((table) => (
+                  <Card
+                    key={table.id}
+                    className="cursor-pointer transition-all hover:bg-muted"
+                    onClick={() => handleSelectItem(table)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getTypeIcon(table.type)}
+                            <span className="text-lg font-medium">
+                              {table.number}-{table.type}
+                            </span>
+                          </div>
+                          <Badge variant="outline">{table.seats} kishilik</Badge>
+                        </div>
+                        {table.waiterId && table.waiterName && (
+                          <div className="mt-1 text-xs text-muted-foreground">Ofitsiant: {table.waiterName}</div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </div>
-          ) : rooms.length === 0 ? (
-            <p className="py-3 text-center text-sm text-muted-foreground">Bo'sh xonalar mavjud emas</p>
-          ) : (
-            <ScrollArea className="h-[200px]">
-              <div className="grid grid-cols-4 gap-2 p-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-                {rooms.map((room) => {
-                  const isSelected = selectedRoom === room.number && !selectedTable
-                  const waiterName = getWaiterName(room.waiterId)
-                  const isRecentOrderItem =
-                    recentOrderInfo &&
-                    room.number === recentOrderInfo.roomNumber &&
-                    recentOrderInfo.seatingType === "Xona"
-
-                  return (
-                    <Button
-                      key={room.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className={`relative h-auto min-h-12 w-full flex-col items-center justify-center p-2 ${
-                        isRecentOrderItem && room.status !== "available" ? "border-amber-500 bg-amber-50" : ""
-                      }`}
-                      onClick={() => handleSelectItem(room.number, "Xona", room.waiterId)}
-                    >
-                      <span className="text-base font-medium">{room.number}</span>
-                      {room.seats && <span className="text-xs text-muted-foreground">{room.seats} kishi</span>}
-                      {waiterName && (
-                        <div className="mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                          <User className="h-3 w-3" />
-                          <span className="truncate">{waiterName}</span>
-                        </div>
-                      )}
-                      {isRecentOrderItem && room.status !== "available" && (
-                        <Badge className="absolute -right-1 -top-1 bg-amber-500">Sizning</Badge>
-                      )}
-                    </Button>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          )}
-        </TabsContent>
-
-        <TabsContent value="divans" className="mt-2">
-          {isLoading ? (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
+          </div>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList
+              className="mb-4 grid w-full"
+              style={{ gridTemplateColumns: `repeat(${seatingTypes.length}, 1fr)` }}
+            >
+              {seatingTypes.map((type) => (
+                <TabsTrigger key={type} value={type.toLowerCase()}>
+                  <div className="flex items-center gap-2">
+                    {getTypeIcon(type)}
+                    {type}
+                  </div>
+                </TabsTrigger>
               ))}
-            </div>
-          ) : divans.length === 0 ? (
-            <p className="py-3 text-center text-sm text-muted-foreground">Bo'sh divanlar mavjud emas</p>
-          ) : (
-            <ScrollArea className="h-[200px]">
-              <div className="grid grid-cols-4 gap-2 p-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-                {divans.map((divan) => {
-                  const isSelected = selectedTable === divan.number && !selectedRoom
-                  const waiterName = getWaiterName(divan.waiterId)
-                  const isRecentOrderItem =
-                    recentOrderInfo &&
-                    divan.number === recentOrderInfo.tableNumber &&
-                    recentOrderInfo.seatingType === "Divan"
+            </TabsList>
 
-                  return (
-                    <Button
-                      key={divan.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className={`relative h-auto min-h-12 w-full flex-col items-center justify-center p-2 ${
-                        isRecentOrderItem && divan.status !== "available" ? "border-amber-500 bg-amber-50" : ""
-                      }`}
-                      onClick={() => handleSelectItem(divan.number, "Divan", divan.waiterId)}
-                    >
-                      <span className="text-base font-medium">{divan.number}</span>
-                      {divan.seats && <span className="text-xs text-muted-foreground">{divan.seats} kishi</span>}
-                      {waiterName && (
-                        <div className="mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                          <User className="h-3 w-3" />
-                          <span className="truncate">{waiterName}</span>
-                        </div>
-                      )}
-                      {isRecentOrderItem && divan.status !== "available" && (
-                        <Badge className="absolute -right-1 -top-1 bg-amber-500">Sizning</Badge>
-                      )}
-                    </Button>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          )}
-        </TabsContent>
+            {seatingTypes.map((type) => {
+              const typeItems = seatingItems.filter((item) => (item.type || "").toLowerCase() === type.toLowerCase())
 
-        <TabsContent value="kreslos" className="mt-2">
-          {isLoading ? (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : kreslos.length === 0 ? (
-            <p className="py-3 text-center text-sm text-muted-foreground">Bo'sh kreslolar mavjud emas</p>
-          ) : (
-            <ScrollArea className="h-[200px]">
-              <div className="grid grid-cols-4 gap-2 p-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-                {kreslos.map((kreslo) => {
-                  const isSelected = selectedTable === kreslo.number && !selectedRoom
-                  const waiterName = getWaiterName(kreslo.waiterId)
-                  const isRecentOrderItem =
-                    recentOrderInfo &&
-                    kreslo.number === recentOrderInfo.tableNumber &&
-                    recentOrderInfo.seatingType === "Kreslo"
-
-                  return (
-                    <Button
-                      key={kreslo.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className={`relative h-auto min-h-12 w-full flex-col items-center justify-center p-2 ${
-                        isRecentOrderItem && kreslo.status !== "available" ? "border-amber-500 bg-amber-50" : ""
-                      }`}
-                      onClick={() => handleSelectItem(kreslo.number, "Kreslo", kreslo.waiterId)}
-                    >
-                      <span className="text-base font-medium">{kreslo.number}</span>
-                      {kreslo.seats && <span className="text-xs text-muted-foreground">{kreslo.seats} kishi</span>}
-                      {waiterName && (
-                        <div className="mt-1 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                          <User className="h-3 w-3" />
-                          <span className="truncate">{waiterName}</span>
-                        </div>
-                      )}
-                      {isRecentOrderItem && kreslo.status !== "available" && (
-                        <Badge className="absolute -right-1 -top-1 bg-amber-500">Sizning</Badge>
-                      )}
-                    </Button>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          )}
-        </TabsContent>
-      </Tabs>
-    </div>
+              return (
+                <TabsContent key={type} value={type.toLowerCase()}>
+                  <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-3 md:grid-cols-4">
+                    {typeItems.length === 0 ? (
+                      <div className="col-span-full rounded-lg border border-dashed p-8 text-center">
+                        <p className="text-muted-foreground">Bo'sh {type.toLowerCase()}lar topilmadi</p>
+                      </div>
+                    ) : (
+                      typeItems.map((item) => (
+                        <Card
+                          key={item.id}
+                          className={`cursor-pointer transition-all hover:bg-muted ${
+                            item.status === "occupied" && item.userRecentlyUsed
+                              ? "border-green-500 bg-green-50"
+                              : item.status === "occupied"
+                                ? "border-amber-500"
+                                : ""
+                          }`}
+                          onClick={() => handleSelectItem(item)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  {getTypeIcon(item.type)}
+                                  <span className="text-lg font-medium">
+                                    {item.number}-{item.type}
+                                  </span>
+                                </div>
+                                <Badge variant="outline">{item.seats} kishilik</Badge>
+                              </div>
+                              {item.waiterId && item.waiterName && (
+                                <div className="mt-1 text-xs text-muted-foreground">Ofitsiant: {item.waiterName}</div>
+                              )}
+                              {item.status === "occupied" && item.userRecentlyUsed && (
+                                <Badge className="mt-2 w-fit bg-green-100 text-green-800">Sizning stolingiz</Badge>
+                              )}
+                              {item.status === "occupied" && !item.userRecentlyUsed && (
+                                <Badge className="mt-2 w-fit bg-amber-100 text-amber-800">Band</Badge>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                </TabsContent>
+              )
+            })}
+          </Tabs>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
