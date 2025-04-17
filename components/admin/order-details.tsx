@@ -8,7 +8,8 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
-import { X } from "lucide-react"
+import { Loader2, MapPin, Phone, User, Receipt } from "lucide-react"
+import { useRouter } from "next/navigation"
 import type { Order } from "@/types"
 
 interface OrderDetailsProps {
@@ -17,12 +18,12 @@ interface OrderDetailsProps {
   isDeleted?: boolean
 }
 
-// Update the order details component to display waiter information
-const OrderDetails = ({ order, onClose }: { order: Order; onClose: () => void }) => {
-  const [waiterName, setWaiterName] = useState<string>("Belgilanmagan")
+export function OrderDetails({ order, onClose, isDeleted = false }: OrderDetailsProps) {
   const [isUpdating, setIsUpdating] = useState(false)
+  const [waiterName, setWaiterName] = useState<string | null>(null)
   const { toast } = useToast()
   const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([])
+  const router = useRouter()
 
   useEffect(() => {
     const fetchWaiters = async () => {
@@ -45,24 +46,51 @@ const OrderDetails = ({ order, onClose }: { order: Order; onClose: () => void })
   }, [])
 
   useEffect(() => {
-    // Fetch waiter name if waiterId is available
-    const fetchWaiterName = async () => {
-      if (order.waiterId) {
-        try {
+    // Fetch waiter information if this is a table order
+    const fetchWaiterInfo = async () => {
+      if (order.orderType !== "table") return
+
+      try {
+        // First check if the order has a waiterId directly
+        if (order.waiterId) {
           const waiterDoc = await getDoc(doc(db, "users", order.waiterId))
           if (waiterDoc.exists()) {
-            setWaiterName(waiterDoc.data().name || "Belgilanmagan")
+            setWaiterName(waiterDoc.data().name)
+            return
           }
-        } catch (error) {
-          console.error("Error fetching waiter:", error)
         }
+
+        // Fallback to the old method for backward compatibility
+        if (order.tableNumber) {
+          const tablesQuery = await getDoc(doc(db, "tables", `table-${order.tableNumber}`))
+          if (tablesQuery.exists() && tablesQuery.data().waiterId) {
+            const waiterId = tablesQuery.data().waiterId
+            const waiterDoc = await getDoc(doc(db, "users", waiterId))
+            if (waiterDoc.exists()) {
+              setWaiterName(waiterDoc.data().name)
+            }
+          }
+        } else if (order.roomNumber) {
+          const roomsQuery = await getDoc(doc(db, "rooms", `room-${order.roomNumber}`))
+          if (roomsQuery.exists() && roomsQuery.data().waiterId) {
+            const waiterId = roomsQuery.data().waiterId
+            const waiterDoc = await getDoc(doc(db, "users", waiterId))
+            if (waiterDoc.exists()) {
+              setWaiterName(waiterDoc.data().name)
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching waiter info:", error)
       }
     }
 
-    fetchWaiterName()
-  }, [order.waiterId])
+    fetchWaiterInfo()
+  }, [order])
 
   const handleUpdateStatus = async (newStatus: string) => {
+    if (isDeleted) return // Don't allow status updates for deleted orders
+
     setIsUpdating(true)
     try {
       await updateDoc(doc(db, "orders", order.id), {
@@ -93,6 +121,11 @@ const OrderDetails = ({ order, onClose }: { order: Order; onClose: () => void })
         title: "Status yangilandi",
         description: `Buyurtma statusi "${newStatus === "paid" ? "To'landi" : newStatus}" ga o'zgartirildi`,
       })
+
+      // If status is "paid", redirect to receipt page
+      if (newStatus === "paid") {
+        router.push(`/receipt/${order.id}`)
+      }
     } catch (error) {
       console.error("Error updating order status:", error)
       toast({
@@ -130,131 +163,232 @@ const OrderDetails = ({ order, onClose }: { order: Order; onClose: () => void })
     }
   }
 
+  const getSeatingTypeDisplay = (order: Order) => {
+    if (order.orderType === "delivery") {
+      return "Yetkazib berish"
+    }
+
+    if (order.seatingType) {
+      // If we have the seating type directly
+      return order.seatingType
+    }
+
+    // For backward compatibility
+    if (order.roomNumber) {
+      return "Xona"
+    }
+
+    return order.tableType || "Stol"
+  }
+
+  const viewReceipt = () => {
+    router.push(`/receipt/${order.id}`)
+  }
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (!order) return
+
+    setIsUpdating(true)
+
+    try {
+      await updateDoc(doc(db, "orders", order.id), {
+        status: newStatus,
+        updatedAt: new Date(),
+      })
+
+      // Play notification sound
+      const audio = new Audio("/success.mp3")
+      audio.play().catch((e) => console.error("Error playing sound:", e))
+
+      toast({
+        title: "Status yangilandi",
+        description: `Buyurtma statusi "${newStatus}" ga o'zgartirildi`,
+      })
+
+      // If status is changed to "paid", redirect to receipt page
+      if (newStatus === "paid") {
+        router.push(`/receipt/${order.id}`)
+      }
+
+      onClose()
+    } catch (error) {
+      console.error("Error updating order status:", error)
+      toast({
+        title: "Xatolik",
+        description: "Statusni yangilashda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Buyurtma #{order.id.slice(-6)}</h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="grid gap-2">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Buyurtma turi:</span>
-          <span>
+      {/* Order header */}
+      <div>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">
             {order.orderType === "table"
               ? order.roomNumber
-                ? `Xona #${order.roomNumber}`
-                : `${order.seatingType || order.tableType || "Stol"} #${order.tableNumber}`
+                ? `${getSeatingTypeDisplay(order)} #${order.roomNumber}`
+                : `${getSeatingTypeDisplay(order)} #${order.tableNumber}`
               : "Yetkazib berish"}
-          </span>
+          </h3>
+          <Badge variant="outline">{getStatusText(order.status)}</Badge>
         </div>
+        <p className="text-sm text-muted-foreground">Buyurtma vaqti: {formatDate(order.createdAt)}</p>
+        {order.deletedAt && (
+          <p className="text-sm text-muted-foreground">O'chirilgan vaqti: {formatDate(order.deletedAt)}</p>
+        )}
 
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Ofitsiant:</span>
-          <span>{waiterName}</span>
-        </div>
-
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Status:</span>
-          <Badge
-            variant="outline"
-            className={
-              order.status === "pending"
-                ? "bg-blue-50 text-blue-700"
-                : order.status === "preparing"
-                  ? "bg-amber-50 text-amber-700"
-                  : order.status === "ready"
-                    ? "bg-green-50 text-green-700"
-                    : order.status === "completed"
-                      ? "bg-green-100 text-green-800"
-                      : order.status === "cancelled"
-                        ? "bg-red-50 text-red-700"
-                        : ""
-            }
-          >
-            {order.status === "pending"
-              ? "Kutilmoqda"
-              : order.status === "preparing"
-                ? "Tayyorlanmoqda"
-                : order.status === "ready"
-                  ? "Tayyor"
-                  : order.status === "completed"
-                    ? "Yakunlangan"
-                    : order.status === "cancelled"
-                      ? "Bekor qilingan"
-                      : order.status}
-          </Badge>
-        </div>
-
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Vaqt:</span>
-          <span>{formatDate(order.createdAt)}</span>
-        </div>
+        {order.orderType === "table" && (
+          <div className="mt-1 flex items-center text-sm">
+            <User className="mr-1 h-4 w-4 text-primary" />
+            <span className="font-medium">Ofitsiant:</span>
+            <span className="ml-1">
+              {waiterName || waiters.find((w) => w.id === order.waiterId)?.name || "Belgilanmagan"}
+            </span>
+          </div>
+        )}
       </div>
 
       <Separator />
 
+      {/* Customer info for delivery orders */}
+      {order.orderType === "delivery" && (
+        <div className="rounded-md bg-muted p-3">
+          <h4 className="mb-2 font-medium">Mijoz ma'lumotlari</h4>
+          {order.phoneNumber && (
+            <div className="flex items-center gap-2 text-sm">
+              <Phone className="h-4 w-4 text-muted-foreground" />
+              <span>{order.phoneNumber}</span>
+            </div>
+          )}
+          {order.address && (
+            <div className="flex items-start gap-2 text-sm">
+              <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+              <span>{order.address}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Order items */}
       <div>
-        <h4 className="mb-2 font-medium">Buyurtma elementlari:</h4>
-        <ul className="space-y-2">
+        <h4 className="mb-2 font-medium">Buyurtma elementlari</h4>
+        <div className="space-y-2 rounded-md border p-3">
           {order.items.map((item, index) => (
-            <li key={index} className="flex justify-between text-sm">
+            <div key={index} className="flex justify-between text-sm">
               <span>
-                {item.name} x {item.quantity}
+                {item.name} × {item.quantity}
               </span>
               <span>{formatCurrency(item.price * item.quantity)}</span>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       </div>
 
-      <Separator />
-
-      <div className="flex justify-between font-medium">
-        <span>Jami summa:</span>
-        <span>{formatCurrency(order.total)}</span>
-      </div>
-
-      {order.notes && (
-        <>
-          <Separator />
-          <div>
-            <h4 className="mb-1 font-medium">Izohlar:</h4>
-            <p className="text-sm text-muted-foreground">{order.notes}</p>
-          </div>
-        </>
-      )}
-
-      {order.orderType === "delivery" && (
-        <>
-          <Separator />
-          <div className="space-y-2">
-            <h4 className="font-medium">Yetkazib berish ma'lumotlari:</h4>
-            <div className="grid gap-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Mijoz:</span>
-                <span>{order.customerName}</span>
+      {/* Order summary */}
+      <div className="rounded-md bg-muted p-3">
+        <h4 className="mb-2 font-medium">Buyurtma xulasasi</h4>
+        <div className="space-y-1">
+          {order.orderType === "delivery" && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span>Taomlar narxi:</span>
+                <span>{formatCurrency(order.subtotal || 0)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Telefon:</span>
-                <span>{order.customerPhone}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Manzil:</span>
-                <span>{order.customerAddress}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Yetkazib berish narxi:</span>
+              {order.containerCost > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span>Idishlar narxi:</span>
+                  <span>{formatCurrency(order.containerCost)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm">
+                <span>Yetkazib berish narxi:</span>
                 <span>{formatCurrency(order.deliveryFee || 0)}</span>
               </div>
-            </div>
+              <Separator className="my-1" />
+            </>
+          )}
+          <div className="flex justify-between font-medium">
+            <span>Jami:</span>
+            <span>{formatCurrency(order.total)}</span>
           </div>
-        </>
+        </div>
+      </div>
+
+      {order.orderType === "table" && (
+        <div className="flex justify-between py-2 border-b">
+          <span className="font-medium">Ofitsiant:</span>
+          <span>{waiters.find((w) => w.id === order.waiterId)?.name || "Belgilanmagan"}</span>
+        </div>
       )}
+
+      {/* Status update buttons */}
+      {!isDeleted && (
+        <div className="space-y-2">
+          <h4 className="font-medium">Buyurtma statusini yangilash</h4>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={order.status === "pending" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("pending")}
+              disabled={isUpdating || order.status === "pending"}
+            >
+              {isUpdating && order.status !== "pending" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Kutilmoqda
+            </Button>
+            <Button
+              variant={order.status === "preparing" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("preparing")}
+              disabled={isUpdating || order.status === "preparing"}
+            >
+              {isUpdating && order.status !== "preparing" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Tayyorlanmoqda
+            </Button>
+            <Button
+              variant={order.status === "completed" ? "default" : "outline"}
+              size="sm"
+              onClick={() => handleUpdateStatus("completed")}
+              disabled={isUpdating || order.status === "completed"}
+            >
+              {isUpdating && order.status !== "completed" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Yakunlangan
+            </Button>
+            <Button
+              variant={order.status === "paid" ? "default" : "outline"}
+              className={
+                order.status === "paid" ? "bg-green-600 hover:bg-green-700" : "text-green-600 hover:text-green-700"
+              }
+              size="sm"
+              onClick={() => handleUpdateStatus("paid")}
+              disabled={isUpdating || order.status === "paid"}
+            >
+              {isUpdating && order.status !== "paid" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              To'landi
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* View receipt button (only for paid orders) */}
+      {order.status === "paid" && (
+        <div className="pt-2">
+          <Button variant="outline" className="w-full" onClick={viewReceipt}>
+            <Receipt className="mr-2 h-4 w-4" />
+            Chekni ko'rish
+          </Button>
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={onClose}>
+          Yopish
+        </Button>
+      </div>
     </div>
   )
 }
-
-export { OrderDetails }

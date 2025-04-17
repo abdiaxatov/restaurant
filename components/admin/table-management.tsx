@@ -467,7 +467,7 @@ export function TableManagement() {
         seats: newItemSeats || defaultCapacity,
         status: newItemStatus,
         type: newItemType,
-        waiterId: newItemWaiterId,
+        waiterId: newItemWaiterId === "none" ? null : newItemWaiterId,
         createdAt: new Date(),
         updatedAt: new Date(),
       }
@@ -546,7 +546,7 @@ export function TableManagement() {
           seats: batchItemSeats || defaultCapacity,
           status: "available",
           type: batchItemType,
-          waiterId: batchItemWaiterId,
+          waiterId: batchItemWaiterId === "none" ? null : batchItemWaiterId,
           createdAt: new Date(),
           updatedAt: new Date(),
         }
@@ -586,7 +586,7 @@ export function TableManagement() {
   }
 
   // Edit a seating item
-  const handleEditItem = async () => {
+  const handleUpdateItem = async () => {
     if (!selectedItem) return
     setIsSubmitting(true)
 
@@ -1044,6 +1044,21 @@ export function TableManagement() {
     setSelectedTypeFilter(null)
   }
 
+  // Fix the table editing issue in the admin/tables page
+  // Find the handleEditItem function and update it
+
+  // Update the handleEditItem function to correctly set the initial values
+  const handleEditItem = (item: SeatingItem) => {
+    // Set the form values with the current item data
+    setSelectedItem(item)
+    setNewItemNumber(item.number)
+    setNewItemSeats(item.seats)
+    setNewItemStatus(item.status)
+    setNewItemType(item.type)
+    setNewItemWaiterId(item.waiterId || null)
+    setIsEditingItem(true)
+  }
+
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6 flex items-center justify-between">
@@ -1299,15 +1314,7 @@ export function TableManagement() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => {
-                                    // Fix: Store the complete item in selectedItem and extract the values immediately
-                                    const itemToEdit = { ...item }
-                                    setSelectedItem(itemToEdit)
-                                    setNewItemNumber(itemToEdit.number)
-                                    setNewItemSeats(itemToEdit.seats)
-                                    setNewItemType(itemToEdit.type)
-                                    setNewItemStatus(itemToEdit.status)
-                                    setNewItemWaiterId(itemToEdit.waiterId || null)
-                                    setIsEditingItem(true)
+                                    handleEditItem(item)
                                   }}
                                 >
                                   <Pencil className="h-4 w-4" />
@@ -1411,14 +1418,7 @@ export function TableManagement() {
                                       variant="ghost"
                                       size="icon"
                                       onClick={() => {
-                                        const itemToEdit = { ...item }
-                                        setSelectedItem(itemToEdit)
-                                        setNewItemNumber(itemToEdit.number)
-                                        setNewItemSeats(itemToEdit.seats)
-                                        setNewItemType(itemToEdit.type)
-                                        setNewItemStatus(itemToEdit.status)
-                                        setNewItemWaiterId(itemToEdit.waiterId || null)
-                                        setIsEditingItem(true)
+                                        handleEditItem(item)
                                       }}
                                     >
                                       <Pencil className="h-4 w-4" />
@@ -1888,7 +1888,7 @@ export function TableManagement() {
             <Button variant="outline" onClick={() => setIsEditingItem(false)} disabled={isSubmitting}>
               Bekor qilish
             </Button>
-            <Button onClick={handleEditItem} disabled={isSubmitting}>
+            <Button onClick={handleUpdateItem} disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

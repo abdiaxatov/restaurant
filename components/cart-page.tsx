@@ -57,25 +57,7 @@ export function CartPage() {
     address?: boolean
   }>({})
   const [waiterId, setWaiterId] = useState<string | null>(null)
-  const [orderData, setOrderData] = useState<{
-    waiterId?: string
-    orderType: "table" | "delivery"
-    tableNumber: number | null
-    roomNumber: number | null
-    seatingType: string | null
-    phoneNumber: string | null
-    address: string | null
-    items: any[]
-    subtotal: number
-    deliveryFee: number
-    containerCost: number
-    total: number
-    status: string
-    isPaid: boolean
-    createdAt?: any
-    userSignature: string
-    userRecentlyUsed?: boolean
-  }>({})
+  const [orderData, setOrderData] = useState<any>({})
   const [selectedTable, setSelectedTable] = useState<number | null>(null)
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null)
   const [selectedTableType, setSelectedTableType] = useState<string | null>(null)
@@ -269,20 +251,13 @@ export function CartPage() {
     room: number | null,
     type: string | null = null,
     waiterId: string | null = null,
-    userRecentlyUsed = false,
   ) => {
     setTableNumber(table)
     setRoomNumber(room)
     setSeatingType(type)
+    // Store the waiterId in state
     setWaiterId(waiterId)
-
-    // Store whether this is a table the user recently used
-    setOrderData((prev) => ({
-      ...prev,
-      userRecentlyUsed: userRecentlyUsed,
-    }))
-
-    console.log("Selected waiterId:", waiterId, "User recently used:", userRecentlyUsed)
+    console.log("Selected waiterId:", waiterId) // Add this for debugging
   }
 
   // Modify the handlePlaceOrder function to add visual feedback for unfilled fields
@@ -392,35 +367,51 @@ export function CartPage() {
         }
       }
 
-      // If seating item is selected, check if we need to mark it as occupied
+      // If seating item is selected, mark it as occupied
       if (orderType === "table") {
-        let success = true
+        let success = false
 
-        // Only mark as occupied if not already in use by this user
-        if (!orderData?.userRecentlyUsed) {
+        // Check if this is a recent order for the same table/room (within 30 minutes)
+        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+        let isRecentOrder = false
+
+        if (lastOrderInfoStr) {
+          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+          const lastOrderTime = new Date(lastOrderInfo.timestamp)
+          const currentTime = new Date()
+          const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
+
+          // If this is the same table/room as the recent order and within 30 minutes
+          if (diffInMinutes <= 30) {
+            if (
+              (roomNumber && lastOrderInfo.roomNumber === roomNumber) ||
+              (tableNumber && lastOrderInfo.tableNumber === tableNumber)
+            ) {
+              isRecentOrder = true
+              success = true
+            }
+          }
+        }
+
+        // If it's not a recent order for the same table, mark it as occupied
+        if (!isRecentOrder) {
           if (roomNumber) {
+            // For rooms, always use "Xona" as the type
             success = await markSeatingItemAsOccupied(roomNumber, "Xona")
           } else if (tableNumber && seatingType) {
             success = await markSeatingItemAsOccupied(tableNumber, seatingType)
           }
-
-          if (!success) {
-            toast({
-              title: "Xatolik",
-              description: "Joy statusini yangilashda xatolik yuz berdi.",
-              variant: "destructive",
-            })
-            setIsSubmitting(false)
-            return
-          }
         }
-      }
 
-      // Get a unique identifier for this user from localStorage
-      let userSignature = localStorage.getItem("userSignature")
-      if (!userSignature) {
-        userSignature = Math.random().toString(36).substring(2, 15)
-        localStorage.setItem("userSignature", userSignature)
+        if (!success) {
+          toast({
+            title: "Xatolik",
+            description: "Joy statusini yangilashda xatolik yuz berdi.",
+            variant: "destructive",
+          })
+          setIsSubmitting(false)
+          return
+        }
       }
 
       // Prepare order data with updated container information
@@ -440,7 +431,7 @@ export function CartPage() {
         }
       })
 
-      const newOrderData = {
+      const orderData = {
         orderType,
         tableNumber: orderType === "table" && tableNumber ? tableNumber : null,
         roomNumber: orderType === "table" && roomNumber ? roomNumber : null,
@@ -453,14 +444,13 @@ export function CartPage() {
         containerCost: orderType === "delivery" ? containerCost : 0,
         total: totalWithDelivery,
         status: "pending",
-        isPaid: false, // Add a flag for payment status
         createdAt: serverTimestamp(),
-        userSignature: userSignature, // Add user signature to track their tables
+        // Include waiterId if available
         ...(waiterId ? { waiterId } : {}),
       }
 
       // Also add a debug log to check the final order data
-      console.log("Order data being submitted:", newOrderData)
+      console.log("Order data being submitted:", orderData)
 
       // Add code to get the waiterId from the seating item and include it in the order
       if (orderType === "table") {
@@ -501,7 +491,7 @@ export function CartPage() {
       }
 
       // Add order to Firestore
-      const docRef = await addDoc(collection(db, "orders"), newOrderData)
+      const docRef = await addDoc(collection(db, "orders"), orderData)
 
       // Oxirgi tanlangan joy ma'lumotlarini saqlash
       if (orderType === "table") {
@@ -614,6 +604,25 @@ export function CartPage() {
         })
         return true
       } else {
+        // Check if we're in a recent order window (30 minutes)
+        const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
+        if (lastOrderInfoStr) {
+          const lastOrderInfo = JSON.parse(lastOrderInfoStr)
+          const lastOrderTime = new Date(lastOrderInfo.timestamp)
+          const currentTime = new Date()
+          const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
+
+          // If this is the same table/room as the recent order and within 30 minutes
+          if (
+            diffInMinutes <= 30 &&
+            ((itemType.toLowerCase() === "stol" && lastOrderInfo.tableNumber === itemNumber) ||
+              (itemType.toLowerCase() === "xona" && lastOrderInfo.roomNumber === itemNumber))
+          ) {
+            // Allow the order to proceed even if the item appears occupied
+            return true
+          }
+        }
+
         console.error(`${itemType} #${itemNumber} not found or not available`)
         toast({
           title: "Xatolik",
@@ -622,8 +631,18 @@ export function CartPage() {
         })
         return false
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating seating item status:", error)
+
+      // If it's an offline error, allow the order to proceed
+      if (error.message && error.message.includes("offline")) {
+        toast({
+          title: "Offline rejim",
+          description: "Siz offline rejimidasiz. Buyurtma saqlandi va internet ulanishi tiklanganida yuboriladi.",
+        })
+        return true
+      }
+
       return false
     }
   }
