@@ -676,10 +676,12 @@ export function AdminDashboard() {
     // Filter by seating number
     let seatingNumberMatch = true
     if (seatingNumberFilter !== null) {
-      if (order.seatingType === "Xona" || (!order.seatingType && order.roomNumber)) {
-        seatingNumberMatch = order.roomNumber === seatingNumberFilter
+      if (order.orderType === "delivery") {
+        seatingNumberMatch = false
       } else {
-        seatingNumberMatch = order.tableNumber === seatingNumberFilter
+        const orderNumber = order.roomNumber || order.tableNumber
+        // Exact number matching instead of includes
+        seatingNumberMatch = orderNumber === seatingNumberFilter
       }
     }
 
