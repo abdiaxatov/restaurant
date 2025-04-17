@@ -242,6 +242,8 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
       try {
         // Get the user's previous orders from localStorage
         const myOrders = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        // Ensure we have string IDs, not objects
+        const myOrderIds = myOrders.map((id) => (typeof id === "object" && id.id ? id.id : id))
         const lastOrderInfoStr = localStorage.getItem("lastOrderInfo")
         let lastSelectedTable = null
         let lastSelectedRoom = null
@@ -280,7 +282,7 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
 
         if (myOrders.length > 0) {
           // Fetch order details to get table/room numbers
-          for (const orderId of myOrders) {
+          for (const orderId of myOrderIds) {
             try {
               const orderDoc = await getDoc(doc(db, "orders", orderId))
               if (orderDoc.exists()) {
@@ -413,11 +415,17 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                 const occupiedItemsQuery = query(collection(db, "seatingItems"), where("status", "==", "occupied"))
                 const occupiedItemsSnapshot = await getDocs(occupiedItemsQuery)
 
+                // Track items we've already added to prevent duplicates
+                const addedItems = new Set()
+
                 occupiedItemsSnapshot.forEach((doc) => {
                   const itemData = doc.data() as SeatingItem
                   // Fix: Add null check for type property
                   const itemType = (itemData.type || "").toLowerCase()
                   const itemNumber = itemData.number
+
+                  // Create a unique key for this item
+                  const itemKey = `${itemType}-${itemNumber}`
 
                   // Check if this is a previously used item
                   let shouldAdd = false
@@ -428,18 +436,24 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                     shouldAdd = userPreviousItems.get("table")?.has(itemNumber) || false
                   }
 
-                  if (shouldAdd) {
+                  // Only add if it's a user's previous item AND we haven't added it yet
+                  if (shouldAdd && !addedItems.has(itemKey)) {
                     // Add waiter name if we have it in our cache
                     let waiterName = itemData.waiterName || null
                     if (itemData.waiterId && waiterNames[itemData.waiterId]) {
                       waiterName = waiterNames[itemData.waiterId]
                     }
 
+                    // Mark this item as a user's recently used item
                     itemsData.push({
                       id: doc.id,
                       ...itemData,
+                      userRecentlyUsed: true,
                       waiterName,
                     })
+
+                    // Mark this item as added
+                    addedItems.add(itemKey)
                   }
                 })
 
@@ -474,7 +488,9 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
               setIsLoading(false)
             }
 
-            // Replace the fetchUserSpecificOccupiedItems function with this improved version
+            // Modify the fetchUserSpecificOccupiedItems function to prevent duplicate entries
+
+            // Replace the fetchUserSpecificOccupiedItems function with this improved version:
             const fetchUserSpecificOccupiedItems = async () => {
               try {
                 // Get user's "signature" - we'll use this to track which tables they've used
@@ -498,6 +514,9 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                   // Calculate the difference in minutes
                   const diffInMinutes = (currentTime.getTime() - lastOrderTime.getTime()) / (1000 * 60)
 
+                  // Track items we've already added to prevent duplicates
+                  const addedItems = new Set()
+
                   // If the last order was within 30 minutes
                   if (diffInMinutes <= 30) {
                     // Add occupied items that match the user's recent order
@@ -506,16 +525,23 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                       const itemType = (itemData.type || "").toLowerCase()
                       const itemNumber = itemData.number
 
-                      // Check if this item matches the last order
+                      // Create a unique key for this item
+                      const itemKey = `${itemType}-${itemNumber}`
+
+                      // Check if this item matches the last order and hasn't been added yet
                       let shouldAdd = false
-                      if (itemType === "xona" && lastOrderInfo.roomNumber === itemNumber) {
+                      if (itemType === "xona" && lastOrderInfo.roomNumber === itemNumber && !addedItems.has(itemKey)) {
                         shouldAdd = true
-                      } else if (itemType !== "xona" && lastOrderInfo.tableNumber === itemNumber) {
+                      } else if (
+                        itemType !== "xona" &&
+                        lastOrderInfo.tableNumber === itemNumber &&
+                        !addedItems.has(itemKey)
+                      ) {
                         shouldAdd = true
                       }
 
                       if (shouldAdd) {
-                        // Generate a unique key for this item to avoid duplicate keys
+                        // Generate a unique ID for this item to avoid duplicate keys
                         const uniqueId = `${docSnapshot.id}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
                         // Get waiter name from lastOrderInfo or from our cache
@@ -524,23 +550,6 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
 
                         if (!waiterName && waiterId && waiterNames[waiterId]) {
                           waiterName = waiterNames[waiterId]
-                        }
-
-                        // If we still don't have a waiter name but have a waiterId, try to get it from Firestore
-                        if (!waiterName && waiterId) {
-                          try {
-                            const waiterDocRef = doc(db, "users", waiterId)
-                            const waiterDocSnapshot = await getDoc(waiterDocRef)
-                            if (waiterDocSnapshot.exists()) {
-                              waiterName = waiterDocSnapshot.data().name
-
-                              // Update lastOrderInfo with the waiter name
-                              lastOrderInfo.waiterName = waiterName
-                              localStorage.setItem("lastOrderInfo", JSON.stringify(lastOrderInfo))
-                            }
-                          } catch (error) {
-                            console.error("Error getting waiter name:", error)
-                          }
                         }
 
                         // Mark this as a recently used item by this user
@@ -552,6 +561,9 @@ export function TableSelector({ selectedTable, selectedRoom, onSelectTable, hasE
                           waiterId: waiterId,
                           waiterName: waiterName,
                         })
+
+                        // Mark this item as added
+                        addedItems.add(itemKey)
                       }
                     }
                   }

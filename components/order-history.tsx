@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { doc, onSnapshot, collection, query, where } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,12 +13,6 @@ import type { Order } from "@/types"
 import { useRouter } from "next/navigation"
 import { getWaiterNameById } from "@/lib/table-service"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import Link from "next/link"
-import { toast } from "@/components/ui/use-toast"
-
-// Import the markOrderAsPaid function
-import { markOrderAsPaid } from "@/lib/receipt-service"
 
 export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -61,14 +55,16 @@ export function OrderHistory() {
       try {
         // Get order IDs from localStorage
         const orderIds = JSON.parse(localStorage.getItem("myOrders") || "[]")
+        // Ensure we have string IDs, not objects
+        const orderIdStrings = orderIds.map((id) => (typeof id === "object" && id.id ? id.id : id))
 
-        if (orderIds.length === 0) {
+        if (orderIdStrings.length === 0) {
           setIsLoading(false)
           return
         }
 
         // Set up real-time listeners for each order
-        const unsubscribes = orderIds.map((id: string) => {
+        const unsubscribes = orderIdStrings.map((id: string) => {
           // First check active orders
           const activeOrderUnsubscribe = onSnapshot(
             doc(db, "orders", id),
@@ -174,7 +170,7 @@ export function OrderHistory() {
       case "ready":
         return <Utensils className="h-5 w-5 text-green-500" />
       case "completed":
-        return <Utensils className="h-5 w-5 text-blue-500" />
+        return <Utensils className="h-5 w-5 text-green-700" />
       case "paid":
         return <CheckCircle className="h-5 w-5 text-green-700" />
       default:
@@ -192,7 +188,7 @@ export function OrderHistory() {
         return "Tayyor"
       case "completed":
         return "Yakunlangan"
-        case "paid":
+      case "paid":
         return "To'langan"
       default:
         return status
@@ -254,12 +250,24 @@ export function OrderHistory() {
 
   return (
     <div className="space-y-4">
+      <Tabs defaultValue="all" onValueChange={setStatusFilter}>
+        <TabsList className="mb-4 w-full flex-wrap">
+          <TabsTrigger value="all">Barchasi</TabsTrigger>
+          <TabsTrigger value="pending">Kutilmoqda</TabsTrigger>
+          <TabsTrigger value="preparing">Tayyorlanmoqda</TabsTrigger>
+          <TabsTrigger value="ready">Tayyor</TabsTrigger>
+          <TabsTrigger value="completed">Yakunlangan</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       <div className="space-y-4">
         {sortedOrders.map((order) => (
           <Card
             key={order.id}
-            className={`overflow-hidden ${order.isPaid === false && order.status === "completed" ? "border-2 border-amber-400" : ""}`}
+            className={`overflow-hidden cursor-pointer transition-all hover:shadow-md ${
+              order.isPaid === false ? "border-2 border-amber-400" : ""
+            }`}
+            onClick={() => router.push(`/confirmation?orderId=${order.id}`)}
           >
             {order.isPaid === false && (
               <div className="bg-amber-100 px-4 py-2 flex items-center gap-2">
@@ -344,53 +352,6 @@ export function OrderHistory() {
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="flex justify-between pt-2">
-              <Button variant="link" size="sm" className="px-0" asChild>
-                <Link href={`/confirmation?orderId=${order.id}`}>Batafsil</Link>
-              </Button>
-
-              {order.status === "completed" && !order.isPaid && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-green-600 hover:bg-green-50 hover:text-green-700"
-                  onClick={async () => {
-                    try {
-                      const success = await markOrderAsPaid(order.id)
-                      if (success) {
-                        router.push(`/receipt?orderId=${order.id}`)
-                      } else {
-                        toast({
-                          title: "Xatolik",
-                          description: "To'lovni qayd qilishda xatolik yuz berdi",
-                          variant: "destructive",
-                        })
-                      }
-                    } catch (error) {
-                      console.error("Error marking order as paid:", error)
-                      toast({
-                        title: "Xatolik",
-                        description: "To'lovni qayd qilishda xatolik yuz berdi",
-                        variant: "destructive",
-                      })
-                    }
-                  }}
-                >
-                  To'lash
-                </Button>
-              )}
-
-              {order.isPaid && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-green-600 hover:bg-green-50 hover:text-green-700"
-                  onClick={() => router.push(`/receipt?orderId=${order.id}`)}
-                >
-                  Chekni ko'rish
-                </Button>
-              )}
-            </CardFooter>
           </Card>
         ))}
       </div>
