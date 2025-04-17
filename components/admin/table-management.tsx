@@ -115,7 +115,7 @@ export function TableManagement() {
   const [isAddingItem, setIsAddingItem] = useState(false)
   const [isEditingItem, setIsEditingItem] = useState(false)
   const [selectedItem, setSelectedItem] = useState<SeatingItem | null>(null)
-  const [newItemNumber, setNewItemNumber] = useState<number>(1)
+  const [newItemNumber, setNewItemNumber] = useState<number>(0)
   const [newItemSeats, setNewItemSeats] = useState<number>(4)
   const [newItemType, setNewItemType] = useState<string>("Stol")
   const [newItemStatus, setNewItemStatus] = useState<"available" | "occupied" | "reserved">("available")
