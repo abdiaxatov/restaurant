@@ -303,9 +303,9 @@ export function TableManagement() {
       const batch = writeBatch(db)
 
       const defaultTypes = [
-        { name: "Stol", defaultCapacity: 4, count: 0 },
-        { name: "Xona", defaultCapacity: 10, count: 0 },
-        { name: "Divan", defaultCapacity: 3, count: 0 },
+        { name: "Stol", defaultCapacity: 1, count: 0 },
+        { name: "Xona", defaultCapacity: 1, count: 0 },
+        { name: "Divan", defaultCapacity: 1, count: 0 },
         { name: "Kreslo", defaultCapacity: 1, count: 0 },
       ]
 
