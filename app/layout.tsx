@@ -11,7 +11,7 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "Restaurant Ordering System",
   description: "Modern restaurant food ordering system",
-    generator: 'v0.dev'
+    generator: ''
 }
 
 export default function RootLayout({
