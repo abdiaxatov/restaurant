@@ -1198,7 +1198,7 @@ export function AdminDashboard() {
             </div>
 
             {/* To'lanmagan buyurtmalar */}
-            {unpaidOrders.length > 0 && (
+            {/* {unpaidOrders.length > 0 && (
               <div className="mt-8 mb-8">
                 <Card className="shadow-sm">
                   <CardHeader>
@@ -1308,7 +1308,7 @@ export function AdminDashboard() {
                   </CardContent>
                 </Card>
               </div>
-            )}
+            )} */}
 
             {/* Buyurtmalar ro'yxati */}
             <div className="mt-8">
