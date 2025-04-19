@@ -92,15 +92,12 @@
 .animate-fade-in {
   animation: fadeIn 0.5s ease-in-out;
 }
-
 .animate-slide-up {
   animation: slideUp 0.5s ease-out;
 }
-
 .animate-pulse-slow {
   animation: pulse 2s infinite;
 }
-
 body::-webkit-scrollbar {
   width: 0px;
 }
